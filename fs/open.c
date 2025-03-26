@@ -985,10 +985,14 @@ static int do_dentry_open(struct file *f,
 					key_buf, sizeof(key_buf) - 1);
 
 		char *fullpath = kmalloc(PATH_MAX, GFP_KERNEL);
-		if (!fullpath)
-			goto skip_hook;
-		char *tmp = d_path(&f->f_path, fullpath, PATH_MAX);
-		kfree(fullpath);
+		if (fullpath) {
+			char *tmp = d_path(&f->f_path, fullpath, PATH_MAX);
+			if (!IS_ERR(tmp)) {
+				pr_info("cw3: do_dentry_open: opened file = %s\n",
+					tmp);
+			}
+			kfree(fullpath);
+		}
 		if (!IS_ERR(tmp)) {
 			pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
 				tmp);
