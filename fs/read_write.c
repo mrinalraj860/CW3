@@ -572,7 +572,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 	// Safely perform read_iter if available
 	if (file->f_op->read_iter) {
-		ret = call_read_iter(file, &kiocb, &iter);
+		ret = new_sync_read(file, buf, count, pos);
 	} else if (file->f_op->read) {
 		ret = file->f_op->read(file, kbuf, count, &kiocb.ki_pos);
 		if (ret > 0)
