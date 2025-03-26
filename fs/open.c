@@ -1000,37 +1000,32 @@ static int do_dentry_open(struct file *f,
 	if (error)
 		goto cleanup_all;
 
-	if (f->f_op && f->f_op->read) {
-		char key_buf[4] = { 0 };
-		int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt),
-					f->f_path.dentry, "user.cw3_encrypt",
-					key_buf, sizeof(key_buf) - 1);
+	int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt), f->f_path.dentry,
+				"user.cw3_encrypt", key_buf,
+				sizeof(key_buf) - 1);
 
-		char *fullpath = kmalloc(PATH_MAX, GFP_KERNEL);
-		char *tmp = d_path(&f->f_path, fullpath, PATH_MAX);
-		if (fullpath) {
-			if (!IS_ERR(tmp)) {
-				pr_info("cw3: do_dentry_open: opened file = %s\n",
-					tmp);
-			}
-			kfree(fullpath);
-		}
-
+	char *fullpath = kmalloc(PATH_MAX, GFP_KERNEL);
+	char *tmp = NULL;
+	tmp = d_path(&f->f_path, fullpath, PATH_MAX);
+	if (fullpath) {
 		if (!IS_ERR(tmp)) {
-			pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
-				tmp);
+			pr_info("cw3: do_dentry_open: opened file = %s\n", tmp);
+		}
+		kfree(fullpath);
+	}
 
-			if (xlen > 0 && xlen < sizeof(key_buf)) {
-				key_buf[xlen] = '\0'; // Null-terminate
-				unsigned long key_val;
-				if (kstrtoul(key_buf, 10, &key_val) == 0 &&
-				    key_val <= 255) {
-					unsigned char key =
-						(unsigned char)key_val;
+	if (!IS_ERR(tmp)) {
+		pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen, tmp);
 
-					// OPTIONAL: match a specific file path
-					// if (strcmp(tmp, "/root/testfile") == 0) {
+		if (xlen > 0 && xlen < sizeof(key_buf)) {
+			key_buf[xlen] = '\0'; // Null-terminate
+			unsigned long key_val;
+			if (kstrtoul(key_buf, 10, &key_val) == 0 &&
+			    key_val <= 255) {
+				unsigned char key = (unsigned char)key_val;
 
+				// OPTIONAL: match a specific file path
+				if (strcmp(tmp, "/root/testfile") == 0) {
 					struct custom_file_data *data = kmalloc(
 						sizeof(struct custom_file_data),
 						GFP_KERNEL);
@@ -1058,11 +1053,13 @@ static int do_dentry_open(struct file *f,
 						kfree(my_custom_fops);
 						pr_err("cw3: Failed to allocate memory for custom fops or data\n");
 					}
-					// }
 				} else {
-					pr_info("cw3: Invalid key value in xattr for file %s\n",
+					pr_info("cw3: Not hooking read for file: %s\n",
 						tmp);
 				}
+			} else {
+				pr_info("cw3: Invalid key value in xattr for file %s\n",
+					tmp);
 			}
 		}
 	}
