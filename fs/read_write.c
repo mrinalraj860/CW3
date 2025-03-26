@@ -469,6 +469,7 @@ EXPORT_SYMBOL(kernel_read);
 #define XATTR_NAME "user.cw3_encrypt"
 
 //CW3
+
 ssize_t custom_read(struct file *file, char __user *buf, size_t count,
 		    loff_t *pos)
 {
@@ -505,6 +506,7 @@ out:
 	kfree(kbuf);
 	return ret;
 }
+
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
