@@ -488,28 +488,22 @@ ssize_t custom_read(struct file *file, char __user *buf, size_t count,
 	if (!kbuf)
 		return -ENOMEM;
 
-	/* Read normally into kernel buffer */
-	if (file->f_op->read != custom_read) {
-		ret = file->f_op->read(file, kbuf, count, pos);
-	} else {
-		ret = new_sync_read(file, kbuf, count, pos);
-	}
-
+	/* Use normal read into kernel buffer */
+	ret = kernel_read(file, kbuf, count, pos);
 	if (ret <= 0)
 		goto out;
 
-	/* Read xattr key */
-	xlen = vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt", &key,
-			    sizeof(key));
+	/* Get xattr using mnt_idmap */
+	xlen = vfs_getxattr(mnt_idmap(file->f_path.mnt), file->f_path.dentry,
+			    "user.cw3_encrypt", &key, sizeof(key));
+
 	if (xlen > 0) {
-		for (ssize_t i = 0; i < ret; i++) {
+		for (ssize_t i = 0; i < ret; i++)
 			kbuf[i] ^= key;
-		}
 	}
 
-	if (copy_to_user(buf, kbuf, ret)) {
+	if (copy_to_user(buf, kbuf, ret))
 		ret = -EFAULT;
-	}
 
 out:
 	kfree(kbuf);
