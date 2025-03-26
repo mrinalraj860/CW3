@@ -950,6 +950,7 @@ static int do_dentry_open(struct file *f,
 					f->f_path.dentry, "user.cw3_encrypt",
 					&dummy, 1);
 		printk("Inside do_dentry_open\n");
+		printk("Xlen is %d\n", xlen);
 		if (xlen > 0) {
 			struct file_operations *my_custom_fops;
 
