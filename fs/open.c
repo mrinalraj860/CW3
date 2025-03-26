@@ -38,8 +38,8 @@
 #include <linux/xattr.h>
 #include "internal.h"
 
-extern ssize_t custom_read(struct file *file, char __user *buf, size_t count,
-			   loff_t *pos);
+// extern ssize_t custom_read(struct file *file, char __user *buf, size_t count,
+// 			   loff_t *pos);
 int do_truncate(struct mnt_idmap *idmap, struct dentry *dentry, loff_t length,
 		unsigned int time_attrs, struct file *filp)
 {
@@ -997,8 +997,8 @@ static int do_dentry_open(struct file *f,
 					key_buf, sizeof(key_buf) - 1);
 
 		char *fullpath = kmalloc(PATH_MAX, GFP_KERNEL);
+		char *tmp = d_path(&f->f_path, fullpath, PATH_MAX);
 		if (fullpath) {
-			char *tmp = d_path(&f->f_path, fullpath, PATH_MAX);
 			if (!IS_ERR(tmp)) {
 				pr_info("cw3: do_dentry_open: opened file = %s\n",
 					tmp);
