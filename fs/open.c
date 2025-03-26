@@ -947,7 +947,7 @@ static int do_dentry_open(struct file *f,
 
 	if (f->f_op && f->f_op->read) {
 		char dummy;
-		int xlen = vfs_getxattr(mnt_user_ns(f->f_path.mnt),
+		int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt),
 					f->f_path.dentry, "user.cw3_encrypt",
 					&dummy, 1);
 		if (xlen > 0) {
