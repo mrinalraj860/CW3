@@ -947,10 +947,39 @@ static int do_dentry_open(struct file *f,
 		goto cleanup_all;
 
 	// === START OF CUSTOM READ HOOK ===
+	// if (f->f_op && f->f_op->read) {
+	// 	char key_buf[4] = {
+	// 		0
+	// 	}; // Support up to 3-digit numbers like "255"
+	// 	int xlen = vfs_getxattr(
+	// 		mnt_idmap(f->f_path.mnt), f->f_path.dentry,
+	// 		"user.cw3_encrypt", key_buf,
+	// 		sizeof(key_buf) - 1); // leave space for null
+
+	// 	char fullpath[PATH_MAX];
+	// 	char *tmp = d_path(&f->f_path, fullpath, sizeof(fullpath));
+	// 	if (!IS_ERR(tmp)) {
+	// 		pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
+	// 			tmp);
+	// 		if (xlen > 0) {
+	// 			key_buf[xlen] = '\0'; // Null-terminate string
+	// 			struct file_operations *my_custom_fops =
+	// 				kmalloc(sizeof(struct file_operations),
+	// 					GFP_KERNEL);
+	// 			if (my_custom_fops) {
+	// 				memcpy(my_custom_fops, f->f_op,
+	// 				       sizeof(struct file_operations));
+	// 				my_custom_fops->read = custom_read;
+	// 				f->f_op = my_custom_fops;
+	// 				pr_info("cw3: custom_read() hook installed for file %s\n",
+	// 					f->f_path.dentry->d_name.name);
+	// 			}
+	// 		}
+	// 	}
+	// }
+
 	if (f->f_op && f->f_op->read) {
-		char key_buf[4] = {
-			0
-		}; // Support up to 3-digit numbers like "255"
+		char key_buf[4] = { 0 }; // Support up to "255"
 		int xlen = vfs_getxattr(
 			mnt_idmap(f->f_path.mnt), f->f_path.dentry,
 			"user.cw3_encrypt", key_buf,
@@ -958,22 +987,30 @@ static int do_dentry_open(struct file *f,
 
 		char fullpath[PATH_MAX];
 		char *tmp = d_path(&f->f_path, fullpath, sizeof(fullpath));
+
 		if (!IS_ERR(tmp)) {
 			pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
 				tmp);
-			if (xlen > 0) {
-				key_buf[xlen] = '\0'; // Null-terminate string
+
+			if (xlen > 0 && xlen < sizeof(key_buf)) {
+				key_buf[xlen] = '\0'; // Null-terminate
+
+				// OPTIONAL: match a specific file path
+				// if (strcmp(tmp, "/root/testfile") == 0) {
+
 				struct file_operations *my_custom_fops =
 					kmalloc(sizeof(struct file_operations),
 						GFP_KERNEL);
+
 				if (my_custom_fops) {
 					memcpy(my_custom_fops, f->f_op,
 					       sizeof(struct file_operations));
 					my_custom_fops->read = custom_read;
 					f->f_op = my_custom_fops;
 					pr_info("cw3: custom_read() hook installed for file %s\n",
-						f->f_path.dentry->d_name.name);
+						tmp);
 				}
+				// }
 			}
 		}
 	}
