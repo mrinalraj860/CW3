@@ -987,7 +987,6 @@ static int do_dentry_open(struct file *f,
 		char *fullpath = kmalloc(PATH_MAX, GFP_KERNEL);
 		if (!fullpath)
 			goto skip_hook;
-
 		char *tmp = d_path(&f->f_path, fullpath, PATH_MAX);
 		if (!IS_ERR(tmp)) {
 			pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
@@ -1016,7 +1015,8 @@ static int do_dentry_open(struct file *f,
 		}
 	}
 	// === END OF CUSTOM READ HOOK ===
-
+	kfree(fullpath); // free after use
+skip_hook:
 	error = break_lease(file_inode(f), f->f_flags);
 	if (error)
 		goto cleanup_all;
