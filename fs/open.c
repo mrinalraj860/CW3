@@ -979,15 +979,16 @@ static int do_dentry_open(struct file *f,
 	// }
 
 	if (f->f_op && f->f_op->read) {
-		char key_buf[4] = { 0 }; // Support up to "255"
-		int xlen = vfs_getxattr(
-			mnt_idmap(f->f_path.mnt), f->f_path.dentry,
-			"user.cw3_encrypt", key_buf,
-			sizeof(key_buf) - 1); // leave space for null
+		char key_buf[4] = { 0 };
+		int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt),
+					f->f_path.dentry, "user.cw3_encrypt",
+					key_buf, sizeof(key_buf) - 1);
 
-		char fullpath[PATH_MAX];
-		char *tmp = d_path(&f->f_path, fullpath, sizeof(fullpath));
+		char *fullpath = kmalloc(PATH_MAX, GFP_KERNEL);
+		if (!fullpath)
+			goto skip_hook;
 
+		char *tmp = d_path(&f->f_path, fullpath, PATH_MAX);
 		if (!IS_ERR(tmp)) {
 			pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
 				tmp);
