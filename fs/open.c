@@ -945,10 +945,10 @@ static int do_dentry_open(struct file *f,
 		goto cleanup_all;
 
 	if (f->f_op && f->f_op->read) {
-		char dummy;
+		char dummy_buf[4];
 		int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt),
 					f->f_path.dentry, "user.cw3_encrypt",
-					&dummy, 1);
+					&dummy_buf, sizeof(dummy_buf));
 		printk("Inside do_dentry_open\n");
 		printk("Xlen is %d\n", xlen);
 		if (xlen > 0) {
