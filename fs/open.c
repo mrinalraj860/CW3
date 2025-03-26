@@ -944,18 +944,25 @@ static int do_dentry_open(struct file *f,
 	error = security_file_open(f);
 	if (error)
 		goto cleanup_all;
-
+	pr_info("cw3: Setting up custom read for %s\n",
+		f->f_path.dentry->d_name.name);
 	if (f->f_op && f->f_op->read) {
 		char dummy;
 		int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt),
 					f->f_path.dentry, "user.cw3_encrypt",
 					&dummy, 1);
 		if (xlen > 0) {
-			static struct file_operations my_custom_fops;
-			memcpy(&my_custom_fops, f->f_op,
-			       sizeof(my_custom_fops));
-			my_custom_fops.read = custom_read;
-			f->f_op = &my_custom_fops;
+			struct file_operations *my_custom_fops;
+
+			my_custom_fops = kmalloc(sizeof(struct file_operations),
+						 GFP_KERNEL);
+			if (my_custom_fops) {
+				memcpy(my_custom_fops, f->f_op,
+				       sizeof(struct file_operations));
+				my_custom_fops->read = custom_read;
+				pr_info("cw3: custom_read() called\n");
+				f->f_op = my_custom_fops;
+			}
 		}
 	}
 
