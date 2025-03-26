@@ -506,7 +506,7 @@ EXPORT_SYMBOL(kernel_read);
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
-	char *kbuf = NULL;
+	char *kbuf;
 	char key_buf[8];
 	int key, i, xattr_len;
 	struct kiocb kiocb;
@@ -523,6 +523,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	ret = rw_verify_area(READ, file, pos, count);
 	if (ret)
 		return ret;
+
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
@@ -537,46 +538,48 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	iov.iov_len = count;
 	iov_iter_kvec(&iter, READ, &iov, 1, count);
 
-	if (file->f_op->read) {
-		ret = file->f_op->read(file, buf, count, pos);
-		kiocb.ki_pos = *pos;
-	} else if (file->f_op->read_iter)
+	if (file->f_op->read_iter) {
 		ret = file->f_op->read_iter(&kiocb, &iter);
-	else {
+	} else if (file->f_op->read) {
+		ret = file->f_op->read(file, kbuf, count, pos);
+		kiocb.ki_pos = *pos;
+	} else {
 		kfree(kbuf);
-		ret = -EINVAL;
+		return -EINVAL;
 	}
+
 	if (ret <= 0) {
 		kfree(kbuf);
 		return ret;
 	}
 
 	*pos = kiocb.ki_pos;
+
+	// Correctly fetch encryption attribute; ignore errors
 	xattr_len = vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
 				 "user.cw3_encrypt", key_buf,
 				 sizeof(key_buf) - 1);
-	printk("Xattr length: %d\n", xattr_len);
+
 	if (xattr_len > 0) {
 		key_buf[xattr_len] = '\0';
-		if (kstrtoint(key_buf, 10, &key) == 0) {
+		if (kstrtoint(key_buf, 10, &key) == 0 && key >= 0 &&
+		    key <= 255) {
 			for (i = 0; i < ret; i++)
 				kbuf[i] ^= (char)key;
 		}
 	}
+
 	if (copy_to_user(buf, kbuf, ret)) {
 		kfree(kbuf);
 		return -EFAULT;
 	}
 
-	if (ret > 0) {
-		fsnotify_access(file);
-		add_rchar(current, ret);
-	}
 	kfree(kbuf);
 
 	fsnotify_access(file);
 	add_rchar(current, ret);
 	inc_syscr(current);
+
 	return ret;
 }
 
