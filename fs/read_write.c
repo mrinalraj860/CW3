@@ -468,13 +468,6 @@ EXPORT_SYMBOL(kernel_read);
 
 #define XATTR_NAME "user.cw3_encrypt"
 
-static void xor_encrypt_buffer(char *buffer, size_t len, unsigned char key)
-{
-	for (size_t i = 0; i < len; i++) {
-		buffer[i] ^= key;
-	}
-}
-
 //CW3
 ssize_t custom_read(struct file *file, char __user *buf, size_t count,
 		    loff_t *pos)
