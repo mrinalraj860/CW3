@@ -25,9 +25,6 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
-ssize_t custom_read(struct file *file, char __user *buf, size_t count,
-		    loff_t *pos);
-
 const struct file_operations generic_ro_fops = {
 	.llseek = generic_file_llseek,
 	.read_iter = generic_file_read_iter,
@@ -470,42 +467,42 @@ EXPORT_SYMBOL(kernel_read);
 
 //CW3
 
-ssize_t custom_read(struct file *file, char __user *buf, size_t count,
-		    loff_t *pos)
-{
-	ssize_t ret;
-	char *kbuf;
-	unsigned char key;
-	int xlen;
+// ssize_t custom_read(struct file *file, char __user *buf, size_t count,
+// 		    loff_t *pos)
+// {
+// 	ssize_t ret;
+// 	char *kbuf;
+// 	unsigned char key;
+// 	int xlen;
 
-	pr_info("cw3: custom_read() called for file: %s\n",
-		file->f_path.dentry->d_name.name);
+// 	pr_info("cw3: custom_read() called for file: %s\n",
+// 		file->f_path.dentry->d_name.name);
 
-	kbuf = kmalloc(count, GFP_KERNEL);
-	if (!kbuf)
-		return -ENOMEM;
+// 	kbuf = kmalloc(count, GFP_KERNEL);
+// 	if (!kbuf)
+// 		return -ENOMEM;
 
-	/* Use normal read into kernel buffer */
-	ret = kernel_read(file, kbuf, count, pos);
-	if (ret <= 0)
-		goto out;
+// 	/* Use normal read into kernel buffer */
+// 	ret = kernel_read(file, kbuf, count, pos);
+// 	if (ret <= 0)
+// 		goto out;
 
-	/* Get xattr using correct API */
-	xlen = vfs_getxattr(mnt_idmap(file->f_path.mnt), file->f_path.dentry,
-			    "user.cw3_encrypt", &key, sizeof(key));
-	pr_info("cw3: vfs_getxattr xlen = %d\n", xlen);
-	if (xlen > 0) {
-		for (ssize_t i = 0; i < ret; i++)
-			kbuf[i] ^= key;
-	}
+// 	/* Get xattr using correct API */
+// 	xlen = vfs_getxattr(mnt_idmap(file->f_path.mnt), file->f_path.dentry,
+// 			    "user.cw3_encrypt", &key, sizeof(key));
+// 	pr_info("cw3: vfs_getxattr xlen = %d\n", xlen);
+// 	if (xlen > 0) {
+// 		for (ssize_t i = 0; i < ret; i++)
+// 			kbuf[i] ^= key;
+// 	}
 
-	if (copy_to_user(buf, kbuf, ret))
-		ret = -EFAULT;
+// 	if (copy_to_user(buf, kbuf, ret))
+// 		ret = -EFAULT;
 
-out:
-	kfree(kbuf);
-	return ret;
-}
+// out:
+// 	kfree(kbuf);
+// 	return ret;
+// }
 
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {

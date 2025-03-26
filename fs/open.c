@@ -903,6 +903,50 @@ cleanup_inode:
 	put_write_access(f->f_inode);
 	return error;
 }
+struct custom_file_data {
+	const struct file_operations *original_fops;
+	unsigned char key;
+};
+
+static ssize_t custom_read(struct file *file, char __user *buf, size_t count,
+			   loff_t *pos)
+{
+	struct custom_file_data *data = file->private_data;
+	if (!data || !data->original_fops || !data->original_fops->read) {
+		return -EINVAL;
+	}
+
+	ssize_t ret = data->original_fops->read(file, buf, count, pos);
+	if (ret > 0) {
+		// Perform XOR encryption
+		for (ssize_t i = 0; i < ret; ++i) {
+			char val;
+			if (get_user(val, &buf[i]) == 0) {
+				val ^= data->key;
+				if (put_user(val, &buf[i]) != 0) {
+					return -EFAULT;
+				}
+			} else {
+				return -EFAULT;
+			}
+		}
+	}
+	return ret;
+}
+
+static int custom_release(struct inode *inode, struct file *file)
+{
+	struct custom_file_data *data = file->private_data;
+	if (data) {
+		kfree(data);
+		file->private_data = NULL;
+		// Call the original release if it exists
+		if (data->original_fops && data->original_fops->release) {
+			return data->original_fops->release(inode, file);
+		}
+	}
+	return 0;
+}
 
 static int do_dentry_open(struct file *f,
 			  int (*open)(struct inode *, struct file *))
@@ -946,38 +990,6 @@ static int do_dentry_open(struct file *f,
 	if (error)
 		goto cleanup_all;
 
-	// === START OF CUSTOM READ HOOK ===
-	// if (f->f_op && f->f_op->read) {
-	// 	char key_buf[4] = {
-	// 		0
-	// 	}; // Support up to 3-digit numbers like "255"
-	// 	int xlen = vfs_getxattr(
-	// 		mnt_idmap(f->f_path.mnt), f->f_path.dentry,
-	// 		"user.cw3_encrypt", key_buf,
-	// 		sizeof(key_buf) - 1); // leave space for null
-
-	// 	char fullpath[PATH_MAX];
-	// 	char *tmp = d_path(&f->f_path, fullpath, sizeof(fullpath));
-	// 	if (!IS_ERR(tmp)) {
-	// 		pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
-	// 			tmp);
-	// 		if (xlen > 0) {
-	// 			key_buf[xlen] = '\0'; // Null-terminate string
-	// 			struct file_operations *my_custom_fops =
-	// 				kmalloc(sizeof(struct file_operations),
-	// 					GFP_KERNEL);
-	// 			if (my_custom_fops) {
-	// 				memcpy(my_custom_fops, f->f_op,
-	// 				       sizeof(struct file_operations));
-	// 				my_custom_fops->read = custom_read;
-	// 				f->f_op = my_custom_fops;
-	// 				pr_info("cw3: custom_read() hook installed for file %s\n",
-	// 					f->f_path.dentry->d_name.name);
-	// 			}
-	// 		}
-	// 	}
-	// }
-
 	if (f->f_op && f->f_op->read) {
 		char key_buf[4] = { 0 };
 		int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt),
@@ -993,35 +1005,58 @@ static int do_dentry_open(struct file *f,
 			}
 			kfree(fullpath);
 		}
+
 		if (!IS_ERR(tmp)) {
 			pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
 				tmp);
 
 			if (xlen > 0 && xlen < sizeof(key_buf)) {
 				key_buf[xlen] = '\0'; // Null-terminate
+				unsigned long key_val;
+				if (kstrtoul(key_buf, 10, &key_val) == 0 &&
+				    key_val <= 255) {
+					unsigned char key =
+						(unsigned char)key_val;
 
-				// OPTIONAL: match a specific file path
-				// if (strcmp(tmp, "/root/testfile") == 0) {
+					// OPTIONAL: match a specific file path
+					// if (strcmp(tmp, "/root/testfile") == 0) {
 
-				struct file_operations *my_custom_fops =
-					kmalloc(sizeof(struct file_operations),
+					struct custom_file_data *data = kmalloc(
+						sizeof(struct custom_file_data),
+						GFP_KERNEL);
+					struct file_operations *my_custom_fops = kmalloc(
+						sizeof(struct file_operations),
 						GFP_KERNEL);
 
-				if (my_custom_fops) {
-					memcpy(my_custom_fops, f->f_op,
-					       sizeof(struct file_operations));
-					my_custom_fops->read = custom_read;
-					f->f_op = my_custom_fops;
-					pr_info("cw3: custom_read() hook installed for file %s\n",
+					if (data && my_custom_fops) {
+						memcpy(my_custom_fops, f->f_op,
+						       sizeof(struct file_operations));
+						data->original_fops = f->f_op;
+						data->key = key;
+
+						my_custom_fops->read =
+							custom_read;
+						my_custom_fops->release =
+							custom_release; // Hook release
+						f->f_op = my_custom_fops;
+						f->private_data =
+							data; // Store custom data in file object
+						pr_info("cw3: custom_read() hook installed for file %s with key %u\n",
+							tmp, key);
+					} else {
+						kfree(data);
+						kfree(my_custom_fops);
+						pr_err("cw3: Failed to allocate memory for custom fops or data\n");
+					}
+					// }
+				} else {
+					pr_info("cw3: Invalid key value in xattr for file %s\n",
 						tmp);
 				}
-				// }
 			}
 		}
 	}
-	// === END OF CUSTOM READ HOOK ===
-	// free after use
-skip_hook:
+
 	error = break_lease(file_inode(f), f->f_flags);
 	if (error)
 		goto cleanup_all;
