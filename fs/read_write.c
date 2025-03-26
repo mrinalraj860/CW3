@@ -503,7 +503,7 @@ EXPORT_SYMBOL(kernel_read);
 // 	kfree(kbuf);
 // 	return ret;
 // }
-/*ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
 
@@ -532,88 +532,88 @@ EXPORT_SYMBOL(kernel_read);
 	}
 	inc_syscr(current);
 	return ret;
-}*/
-
-ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
-{
-	ssize_t ret;
-	char *kbuf = NULL;
-	char key_buf[9]; // Increased size to accommodate potential null terminator
-	int key, i, xattr_len;
-	struct kiocb kiocb;
-	struct iov_iter iter;
-	struct kvec iov;
-
-	if (!(file->f_mode & FMODE_READ))
-		return -EBADF;
-	if (!(file->f_mode & FMODE_CAN_READ))
-		return -EINVAL;
-	if (unlikely(!access_ok(buf, count)))
-		return -EFAULT;
-
-	ret = rw_verify_area(READ, file, pos, count);
-	if (ret)
-		return ret;
-
-	if (count > MAX_RW_COUNT)
-		count = MAX_RW_COUNT;
-
-	kbuf = kmalloc(count, GFP_KERNEL);
-	if (!kbuf)
-		return -ENOMEM;
-
-	// Correct initialization of kiocb and iter
-	init_sync_kiocb(&kiocb, file);
-	kiocb.ki_pos = *pos;
-
-	iov.iov_base = kbuf;
-	iov.iov_len = count;
-	iov_iter_kvec(&iter, READ, &iov, 1, count);
-
-	// Safely perform read_iter if available
-	if (file->f_op->read_iter) {
-		ret = new_sync_read(file, buf, count, pos);
-	} else if (file->f_op->read) {
-		ret = file->f_op->read(file, kbuf, count, &kiocb.ki_pos);
-		if (ret > 0)
-			*pos = kiocb.ki_pos; // update position explicitly on success
-	} else {
-		kfree(kbuf);
-		return -EINVAL;
-	}
-
-	if (ret <= 0) {
-		kfree(kbuf);
-		return ret;
-	}
-
-	// Fetch encryption key safely
-	xattr_len = vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
-				 "user.cw3_encrypt", key_buf,
-				 sizeof(key_buf) - 1);
-
-	if (xattr_len > 0 && xattr_len < sizeof(key_buf)) {
-		key_buf[xattr_len] = '\0';
-		if (kstrtoint(key_buf, 10, &key) == 0) {
-			for (i = 0; i < ret; i++)
-				kbuf[i] ^= (char)key;
-		}
-	}
-
-	// Carefully copy back (potentially) decrypted data to user-space
-	if (copy_to_user(buf, kbuf, ret)) {
-		kfree(kbuf);
-		return -EFAULT;
-	}
-
-	kfree(kbuf);
-
-	fsnotify_access(file);
-	add_rchar(current, ret);
-	inc_syscr(current);
-
-	return ret;
 }
+
+// ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+// {
+// 	ssize_t ret;
+// 	char *kbuf = NULL;
+// 	char key_buf[9]; // Increased size to accommodate potential null terminator
+// 	int key, i, xattr_len;
+// 	struct kiocb kiocb;
+// 	struct iov_iter iter;
+// 	struct kvec iov;
+
+// 	if (!(file->f_mode & FMODE_READ))
+// 		return -EBADF;
+// 	if (!(file->f_mode & FMODE_CAN_READ))
+// 		return -EINVAL;
+// 	if (unlikely(!access_ok(buf, count)))
+// 		return -EFAULT;
+
+// 	ret = rw_verify_area(READ, file, pos, count);
+// 	if (ret)
+// 		return ret;
+
+// 	if (count > MAX_RW_COUNT)
+// 		count = MAX_RW_COUNT;
+
+// 	kbuf = kmalloc(count, GFP_KERNEL);
+// 	if (!kbuf)
+// 		return -ENOMEM;
+
+// 	// Correct initialization of kiocb and iter
+// 	init_sync_kiocb(&kiocb, file);
+// 	kiocb.ki_pos = *pos;
+
+// 	iov.iov_base = kbuf;
+// 	iov.iov_len = count;
+// 	iov_iter_kvec(&iter, READ, &iov, 1, count);
+
+// 	// Safely perform read_iter if available
+// 	if (file->f_op->read_iter) {
+// 		ret = new_sync_read(file, buf, count, pos);
+// 	} else if (file->f_op->read) {
+// 		ret = file->f_op->read(file, kbuf, count, &kiocb.ki_pos);
+// 		if (ret > 0)
+// 			*pos = kiocb.ki_pos; // update position explicitly on success
+// 	} else {
+// 		kfree(kbuf);
+// 		return -EINVAL;
+// 	}
+
+// 	if (ret <= 0) {
+// 		kfree(kbuf);
+// 		return ret;
+// 	}
+
+// 	// Fetch encryption key safely
+// 	xattr_len = vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
+// 				 "user.cw3_encrypt", key_buf,
+// 				 sizeof(key_buf) - 1);
+
+// 	if (xattr_len > 0 && xattr_len < sizeof(key_buf)) {
+// 		key_buf[xattr_len] = '\0';
+// 		if (kstrtoint(key_buf, 10, &key) == 0) {
+// 			for (i = 0; i < ret; i++)
+// 				kbuf[i] ^= (char)key;
+// 		}
+// 	}
+
+// 	// Carefully copy back (potentially) decrypted data to user-space
+// 	if (copy_to_user(buf, kbuf, ret)) {
+// 		kfree(kbuf);
+// 		return -EFAULT;
+// 	}
+
+// 	kfree(kbuf);
+
+// 	fsnotify_access(file);
+// 	add_rchar(current, ret);
+// 	inc_syscr(current);
+
+// 	return ret;
+// }
 
 static ssize_t new_sync_write(struct file *filp, const char __user *buf,
 			      size_t len, loff_t *ppos)
