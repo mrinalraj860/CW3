@@ -469,39 +469,6 @@ EXPORT_SYMBOL(kernel_read);
 #define XATTR_NAME "user.cw3_encrypt"
 
 //CW3
-ssize_t custom_read(struct file *file, char __user *buf, size_t count,
-		    loff_t *pos)
-{
-	ssize_t ret;
-	char *kbuf;
-	unsigned char key;
-	int xlen;
-
-	kbuf = kmalloc(count, GFP_KERNEL);
-	if (!kbuf)
-		return -ENOMEM;
-
-	/* Use normal read into kernel buffer */
-	ret = kernel_read(file, kbuf, count, pos);
-	if (ret <= 0)
-		goto out;
-
-	/* Get xattr using mnt_idmap */
-	xlen = vfs_getxattr(mnt_idmap(file->f_path.mnt), file->f_path.dentry,
-			    "user.cw3_encrypt", &key, sizeof(key));
-
-	if (xlen > 0) {
-		for (ssize_t i = 0; i < ret; i++)
-			kbuf[i] ^= key;
-	}
-
-	if (copy_to_user(buf, kbuf, ret))
-		ret = -EFAULT;
-
-out:
-	kfree(kbuf);
-	return ret;
-}
 
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {

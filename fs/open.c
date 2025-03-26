@@ -944,8 +944,8 @@ static int do_dentry_open(struct file *f,
 	error = security_file_open(f);
 	if (error)
 		goto cleanup_all;
-	pr_info("cw3: Setting up custom read for %s\n",
-		f->f_path.dentry->d_name.name);
+
+
 	if (f->f_op && f->f_op->read) {
 		char dummy;
 		int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt),
