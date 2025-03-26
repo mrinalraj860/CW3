@@ -507,6 +507,9 @@ EXPORT_SYMBOL(kernel_read);
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
+	char *kbuf = NULL;
+	char key_buf[4];
+	int key, i, xattr_len;
 
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
@@ -521,17 +524,54 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
-	if (file->f_op->read)
-		ret = file->f_op->read(file, buf, count, pos);
-	else if (file->f_op->read_iter)
-		ret = new_sync_read(file, buf, count, pos);
-	else
+	// Allocate kernel buffer
+	kbuf = kmalloc(count, GFP_KERNEL);
+	if (!kbuf)
+		return -ENOMEM;
+
+	// Read file contents into kernel buffer
+	if (file->f_op->read) {
+		ret = file->f_op->read(file, kbuf, count, pos);
+	} else if (file->f_op->read_iter) {
+		struct iov_iter iter;
+		struct kvec iov = { .iov_base = kbuf, .iov_len = count };
+		iov_iter_kvec(&iter, READ, &iov, 1, count);
+		ret = file->f_op->read_iter(file, &iter, pos);
+	} else {
 		ret = -EINVAL;
+	}
+
+	if (ret <= 0) {
+		kfree(kbuf);
+		return ret;
+	}
+
+	// Check for XOR encryption attribute
+	xattr_len = vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt",
+				 key_buf, sizeof(key_buf));
+	if (xattr_len > 0) {
+		key_buf[xattr_len] = '\0'; // Ensure null-termination
+		if (kstrtoint(key_buf, 10, &key) == 0) {
+			for (i = 0; i < ret; i++)
+				kbuf[i] ^= (char)key; // Apply XOR encryption
+		}
+	}
+
+	// Copy encrypted data back to user-space buffer
+	if (copy_to_user(buf, kbuf, ret)) {
+		kfree(kbuf);
+		return -EFAULT;
+	}
+
+	// Cleanup kernel buffer
+	kfree(kbuf);
+
 	if (ret > 0) {
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
 	inc_syscr(current);
+
 	return ret;
 }
 
