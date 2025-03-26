@@ -916,20 +916,30 @@ static ssize_t custom_read(struct file *file, char __user *buf, size_t count,
 		return -EINVAL;
 	}
 
+	pr_info("cw3: custom_read: key = %u\n", data->key);
+
 	ssize_t ret = data->original_fops->read(file, buf, count, pos);
+	pr_info("cw3: custom_read: original read returned %zd\n", ret);
+
 	if (ret > 0) {
+		pr_info("cw3: custom_read: first byte before XOR = %x\n",
+			*(unsigned char *)buf);
 		// Perform XOR encryption
 		for (ssize_t i = 0; i < ret; ++i) {
 			char val;
 			if (get_user(val, &buf[i]) == 0) {
 				val ^= data->key;
 				if (put_user(val, &buf[i]) != 0) {
+					pr_err("cw3: custom_read: put_user failed\n");
 					return -EFAULT;
 				}
 			} else {
+				pr_err("cw3: custom_read: get_user failed\n");
 				return -EFAULT;
 			}
 		}
+		pr_info("cw3: custom_read: first byte after XOR = %x\n",
+			*(unsigned char *)buf);
 	}
 	return ret;
 }
