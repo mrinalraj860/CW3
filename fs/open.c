@@ -38,7 +38,6 @@
 
 extern ssize_t custom_read(struct file *file, char __user *buf, size_t count,
 			   loff_t *pos);
-
 int do_truncate(struct mnt_idmap *idmap, struct dentry *dentry, loff_t length,
 		unsigned int time_attrs, struct file *filp)
 {
@@ -944,7 +943,6 @@ static int do_dentry_open(struct file *f,
 	error = security_file_open(f);
 	if (error)
 		goto cleanup_all;
-
 
 	if (f->f_op && f->f_op->read) {
 		char dummy;
