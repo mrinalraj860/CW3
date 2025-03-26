@@ -25,6 +25,9 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
+ssize_t custom_read(struct file *file, char __user *buf, size_t count,
+		    loff_t *pos);
+
 const struct file_operations generic_ro_fops = {
 	.llseek = generic_file_llseek,
 	.read_iter = generic_file_read_iter,
@@ -471,6 +474,7 @@ static void xor_encrypt_buffer(char *buffer, size_t len, unsigned char key)
 		buffer[i] ^= key;
 	}
 }
+
 //CW3
 ssize_t custom_read(struct file *file, char __user *buf, size_t count,
 		    loff_t *pos)

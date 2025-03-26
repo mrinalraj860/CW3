@@ -36,6 +36,9 @@
 #include <linux/xattr.h>
 #include "internal.h"
 
+extern ssize_t custom_read(struct file *file, char __user *buf, size_t count,
+			   loff_t *pos);
+
 int do_truncate(struct mnt_idmap *idmap, struct dentry *dentry, loff_t length,
 		unsigned int time_attrs, struct file *filp)
 {
@@ -899,8 +902,6 @@ cleanup_inode:
 	put_write_access(f->f_inode);
 	return error;
 }
-extern ssize_t custom_read(struct file *file, char __user *buf, size_t count,
-			   loff_t *pos);
 
 static int do_dentry_open(struct file *f,
 			  int (*open)(struct inode *, struct file *))
@@ -946,8 +947,9 @@ static int do_dentry_open(struct file *f,
 
 	if (f->f_op && f->f_op->read) {
 		char dummy;
-		int xlen = vfs_getxattr(f->f_path.dentry, "user.cw3_encrypt",
-					&dummy, 1);
+		int xlen = vfs_getxattr(mnt_user_ns(f->f_path.mnt),
+					f->f_path.dentry, "user.cw3_encrypt",
+					&key, sizeof(key));
 		if (xlen > 0) {
 			static struct file_operations my_custom_fops;
 			memcpy(&my_custom_fops, f->f_op,
