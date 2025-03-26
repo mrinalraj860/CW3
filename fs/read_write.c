@@ -503,13 +503,15 @@ EXPORT_SYMBOL(kernel_read);
 // 	kfree(kbuf);
 // 	return ret;
 // }
-
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
 	char *kbuf = NULL;
-	char key_buf[4];
+	char key_buf[8];
 	int key, i, xattr_len;
+	struct kiocb kiocb;
+	struct iov_iter iter;
+	struct kvec iov;
 
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
@@ -521,6 +523,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	ret = rw_verify_area(READ, file, pos, count);
 	if (ret)
 		return ret;
+
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
@@ -529,14 +532,19 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (!kbuf)
 		return -ENOMEM;
 
-	// Read file contents into kernel buffer
-	if (file->f_op->read) {
+	// Initialize kiocb
+	init_sync_kiocb(&kiocb, file);
+	kiocb.ki_pos = *pos;
+
+	// Prepare iov_iter for reading into kernel buffer
+	iov.iov_base = kbuf;
+	iov.iov_len = count;
+	iov_iter_kvec(&iter, READ, &iov, 1, count);
+
+	if (file->f_op->read_iter) {
+		ret = file->f_op->read_iter(&kiocb, &iter);
+	} else if (file->f_op->read) {
 		ret = file->f_op->read(file, kbuf, count, pos);
-	} else if (file->f_op->read_iter) {
-		struct iov_iter iter;
-		struct kvec iov = { .iov_base = kbuf, .iov_len = count };
-		iov_iter_kvec(&iter, READ, &iov, 1, count);
-		ret = file->f_op->read_iter(file, &iter, pos);
 	} else {
 		ret = -EINVAL;
 	}
@@ -546,14 +554,19 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		return ret;
 	}
 
-	// Check for XOR encryption attribute
-	xattr_len = vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt",
-				 key_buf, sizeof(key_buf));
+	// Update file position after read
+	*pos = kiocb.ki_pos;
+
+	// Correct usage of vfs_getxattr for kernel v6.13+
+	xattr_len = vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
+				 "user.cw3_encrypt", key_buf,
+				 sizeof(key_buf) - 1);
+
 	if (xattr_len > 0) {
-		key_buf[xattr_len] = '\0'; // Ensure null-termination
+		key_buf[xattr_len] = '\0';
 		if (kstrtoint(key_buf, 10, &key) == 0) {
 			for (i = 0; i < ret; i++)
-				kbuf[i] ^= (char)key; // Apply XOR encryption
+				kbuf[i] ^= (char)key;
 		}
 	}
 
@@ -563,13 +576,10 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		return -EFAULT;
 	}
 
-	// Cleanup kernel buffer
 	kfree(kbuf);
 
-	if (ret > 0) {
-		fsnotify_access(file);
-		add_rchar(current, ret);
-	}
+	fsnotify_access(file);
+	add_rchar(current, ret);
 	inc_syscr(current);
 
 	return ret;
