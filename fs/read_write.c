@@ -492,7 +492,7 @@ ssize_t custom_read(struct file *file, char __user *buf, size_t count,
 	/* Get xattr using correct API */
 	xlen = vfs_getxattr(mnt_idmap(file->f_path.mnt), file->f_path.dentry,
 			    "user.cw3_encrypt", &key, sizeof(key));
-
+	pr_info("cw3: vfs_getxattr xlen = %d\n", xlen);
 	if (xlen > 0) {
 		for (ssize_t i = 0; i < ret; i++)
 			kbuf[i] ^= key;
