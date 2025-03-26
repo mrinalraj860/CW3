@@ -558,26 +558,27 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
-	// Allocate kernel buffer
 	kbuf = kmalloc(count, GFP_KERNEL);
 	if (!kbuf)
 		return -ENOMEM;
 
-	// Initialize kiocb
+	// Correct initialization of kiocb and iter
 	init_sync_kiocb(&kiocb, file);
 	kiocb.ki_pos = *pos;
 
-	// Prepare iov_iter for reading into kernel buffer
 	iov.iov_base = kbuf;
 	iov.iov_len = count;
 	iov_iter_kvec(&iter, READ, &iov, 1, count);
 
+	// Safely perform read_iter if available
 	if (file->f_op->read_iter) {
 		ret = file->f_op->read_iter(&kiocb, &iter);
 	} else if (file->f_op->read) {
 		ret = file->f_op->read(file, kbuf, count, pos);
+		kiocb.ki_pos = *pos; // update position explicitly
 	} else {
-		ret = -EINVAL;
+		kfree(kbuf);
+		return -EINVAL;
 	}
 
 	if (ret <= 0) {
@@ -585,10 +586,9 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		return ret;
 	}
 
-	// Update file position after read
 	*pos = kiocb.ki_pos;
 
-	// Correct usage of vfs_getxattr for kernel v6.13+
+	// Fetch encryption key safely
 	xattr_len = vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
 				 "user.cw3_encrypt", key_buf,
 				 sizeof(key_buf) - 1);
@@ -601,7 +601,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		}
 	}
 
-	// Copy encrypted data back to user-space buffer
+	// Carefully copy back encrypted data to user-space
 	if (copy_to_user(buf, kbuf, ret)) {
 		kfree(kbuf);
 		return -EFAULT;
