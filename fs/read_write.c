@@ -551,10 +551,13 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		iov_kernel.iov_len = count;
 		iov_iter_kvec(&iter, READ, &iov_kernel, 1, count);
 
+		if (!file || !file->f_op)
+			return -EINVAL;
+
 		// Perform read_iter safely
-		if (file->f_op->read_iter) {
+		if (file->f_op && file->f_op->read_iter) {
 			ret = file->f_op->read_iter(&kiocb, &iter);
-		} else if (file->f_op->read) {
+		} else if (file->f_op && file->f_op->read) {
 			// Safely read into user buffer first, then copy to kernel buffer
 			ret = file->f_op->read(file, buf, count, pos);
 			if (ret <= 0) {
@@ -593,7 +596,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		kfree(kbuf);
 	} else {
 		// NO ENCRYPTION: Perform normal read operation safely using original methods
-		if (file->f_op->read_iter) {
+		if (file->f_op && file->f_op->read_iter) {
 			init_sync_kiocb(&kiocb, file);
 			kiocb.ki_pos = *pos;
 
@@ -603,7 +606,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 			ret = file->f_op->read_iter(&kiocb, &iter);
 			*pos = kiocb.ki_pos;
-		} else if (file->f_op->read) {
+		} else if (file->f_op && file->f_op->read) {
 			ret = file->f_op->read(file, buf, count, pos);
 		} else {
 			return -EINVAL;
