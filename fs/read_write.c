@@ -506,6 +506,12 @@ EXPORT_SYMBOL(kernel_read);
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
+	char *kbuf = NULL;
+	char key_buf[8];
+	int key, i, xattr_len;
+	struct kiocb kiocb;
+	struct iov_iter iter;
+	struct kvec iov;
 
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
@@ -520,16 +526,56 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
-	if (file->f_op->read)
+	kbuf = kmalloc(count, GFP_KERNEL);
+	if (!kbuf)
+		return -ENOMEM;
+
+	init_sync_kiocb(&kiocb, file);
+	kiocb.ki_pos = *pos;
+
+	iov.iov_base = kbuf;
+	iov.iov_len = count;
+	iov_iter_kvec(&iter, READ, &iov, 1, count);
+
+	if (file->f_op->read) {
 		ret = file->f_op->read(file, buf, count, pos);
-	else if (file->f_op->read_iter)
+		kiocb.ki_pos = *pos;
+	} else if (file->f_op->read_iter)
 		ret = new_sync_read(file, buf, count, pos);
-	else
+	else {
+		kfree(kbuf);
 		ret = -EINVAL;
+	}
+	if (ret <= 0) {
+		kfree(kbuf);
+		return ret;
+	}
+
+	*pos = kiocb.ki_pos;
+	xattr_len = vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
+				 "user.cw3_encrypt", key_buf,
+				 sizeof(key_buf) - 1);
+	printk("Xattr length: %d\n", xattr_len);
+	if (xattr_len > 0) {
+		key_buf[xattr_len] = '\0';
+		if (kstrtoint(key_buf, 10, &key) == 0) {
+			for (i = 0; i < ret; i++)
+				kbuf[i] ^= (char)key;
+		}
+	}
+	if (copy_to_user(buf, kbuf, ret)) {
+		kfree(kbuf);
+		return -EFAULT;
+	}
+
 	if (ret > 0) {
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
+	kfree(kbuf);
+
+	fsnotify_access(file);
+	add_rchar(current, ret);
 	inc_syscr(current);
 	return ret;
 }
