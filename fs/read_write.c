@@ -511,7 +511,8 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	int key, i, xattr_len;
 	struct kiocb kiocb;
 	struct iov_iter iter;
-	struct kvec iov;
+	struct iovec iov_user;
+	struct kvec iov_kernel;
 
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
@@ -527,33 +528,34 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
-	// Check if encryption attribute is set FIRST
+	// First, check encryption attribute properly
 	xattr_len = vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
 				 "user.cw3_encrypt", key_buf,
 				 sizeof(key_buf) - 1);
 
 	if (xattr_len > 0) {
 		key_buf[xattr_len] = '\0';
-		if (kstrtoint(key_buf, 10, &key) != 0 || key < 0 || key > 255) {
-			key = 0; // fallback if invalid key
-		}
+		if (kstrtoint(key_buf, 10, &key) != 0 || key < 0 || key > 255)
+			key = 0; // fallback to no encryption if invalid key
 
-		// Allocate kernel buffer only if encryption is required
+		// Allocate kernel buffer for encryption case
 		kbuf = kmalloc(count, GFP_KERNEL);
 		if (!kbuf)
 			return -ENOMEM;
 
+		// Initialize kiocb
 		init_sync_kiocb(&kiocb, file);
 		kiocb.ki_pos = *pos;
 
-		iov.iov_base = kbuf;
-		iov.iov_len = count;
-		iov_iter_kvec(&iter, READ, &iov, 1, count);
+		iov_kernel.iov_base = kbuf;
+		iov_kernel.iov_len = count;
+		iov_iter_kvec(&iter, READ, &iov_kernel, 1, count);
 
+		// Perform read_iter safely
 		if (file->f_op->read_iter) {
 			ret = file->f_op->read_iter(&kiocb, &iter);
 		} else if (file->f_op->read) {
-			// Read into user buffer first, then copy into kernel buffer
+			// Safely read into user buffer first, then copy to kernel buffer
 			ret = file->f_op->read(file, buf, count, pos);
 			if (ret <= 0) {
 				kfree(kbuf);
@@ -576,13 +578,13 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 		*pos = kiocb.ki_pos;
 
-		// XOR encryption
+		// XOR encryption only if valid key
 		if (key != 0) {
 			for (i = 0; i < ret; i++)
 				kbuf[i] ^= (char)key;
 		}
 
-		// Copy encrypted data back to user
+		// Copy encrypted data back to user safely
 		if (copy_to_user(buf, kbuf, ret)) {
 			kfree(kbuf);
 			return -EFAULT;
@@ -590,11 +592,17 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 		kfree(kbuf);
 	} else {
-		// No encryption attribute, perform normal read
+		// NO ENCRYPTION: Perform normal read operation safely using original methods
 		if (file->f_op->read_iter) {
 			init_sync_kiocb(&kiocb, file);
 			kiocb.ki_pos = *pos;
-			ret = new_sync_read(file, buf, count, pos);
+
+			iov_user.iov_base = buf;
+			iov_user.iov_len = count;
+			iov_iter_init(&iter, READ, &iov_user, 1, count);
+
+			ret = file->f_op->read_iter(&kiocb, &iter);
+			*pos = kiocb.ki_pos;
 		} else if (file->f_op->read) {
 			ret = file->f_op->read(file, buf, count, pos);
 		} else {
@@ -603,8 +611,6 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 		if (ret <= 0)
 			return ret;
-
-		*pos += ret;
 	}
 
 	fsnotify_access(file);
