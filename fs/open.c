@@ -1000,66 +1000,78 @@ static int do_dentry_open(struct file *f,
 	if (error)
 		goto cleanup_all;
 
-	int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt), f->f_path.dentry,
-				"user.cw3_encrypt", key_buf,
-				sizeof(key_buf) - 1);
+	if (f->f_op && f->f_op->read) {
+		char key_buf[4] = { 0 };
 
-	char *fullpath = kmalloc(PATH_MAX, GFP_KERNEL);
-	char *tmp = NULL;
-	tmp = d_path(&f->f_path, fullpath, PATH_MAX);
-	if (fullpath) {
-		if (!IS_ERR(tmp)) {
-			pr_info("cw3: do_dentry_open: opened file = %s\n", tmp);
+		int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt),
+					f->f_path.dentry, "user.cw3_encrypt",
+					key_buf, sizeof(key_buf) - 1);
+
+		char *fullpath = kmalloc(PATH_MAX, GFP_KERNEL);
+		char *tmp = NULL;
+		tmp = d_path(&f->f_path, fullpath, PATH_MAX);
+		if (fullpath) {
+			if (!IS_ERR(tmp)) {
+				pr_info("cw3: do_dentry_open: opened file = %s\n",
+					tmp);
+			}
+			kfree(fullpath);
 		}
-		kfree(fullpath);
-	}
 
-	if (!IS_ERR(tmp)) {
-		pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen, tmp);
+		if (!IS_ERR(tmp)) {
+			pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
+				tmp);
 
-		if (xlen > 0 && xlen < sizeof(key_buf)) {
-			key_buf[xlen] = '\0'; // Null-terminate
-			unsigned long key_val;
-			if (kstrtoul(key_buf, 10, &key_val) == 0 &&
-			    key_val <= 255) {
-				unsigned char key = (unsigned char)key_val;
+			if (xlen > 0 && xlen < sizeof(key_buf)) {
+				key_buf[xlen] = '\0'; // Null-terminate
+				unsigned long key_val;
+				if (kstrtoul(key_buf, 10, &key_val) == 0 &&
+				    key_val <= 255) {
+					unsigned char key =
+						(unsigned char)key_val;
 
-				// OPTIONAL: match a specific file path
-				if (strcmp(tmp, "/root/testfile") == 0) {
-					struct custom_file_data *data = kmalloc(
-						sizeof(struct custom_file_data),
-						GFP_KERNEL);
-					struct file_operations *my_custom_fops = kmalloc(
-						sizeof(struct file_operations),
-						GFP_KERNEL);
+					// OPTIONAL: match a specific file path
+					if (strcmp(tmp, "/root/testfile") ==
+					    0) {
+						struct custom_file_data *data = kmalloc(
+							sizeof(struct custom_file_data),
+							GFP_KERNEL);
+						struct file_operations *
+							my_custom_fops = kmalloc(
+								sizeof(struct file_operations),
+								GFP_KERNEL);
 
-					if (data && my_custom_fops) {
-						memcpy(my_custom_fops, f->f_op,
-						       sizeof(struct file_operations));
-						data->original_fops = f->f_op;
-						data->key = key;
+						if (data && my_custom_fops) {
+							memcpy(my_custom_fops,
+							       f->f_op,
+							       sizeof(struct file_operations));
+							data->original_fops =
+								f->f_op;
+							data->key = key;
 
-						my_custom_fops->read =
-							custom_read;
-						my_custom_fops->release =
-							custom_release; // Hook release
-						f->f_op = my_custom_fops;
-						f->private_data =
-							data; // Store custom data in file object
-						pr_info("cw3: custom_read() hook installed for file %s with key %u\n",
-							tmp, key);
+							my_custom_fops->read =
+								custom_read;
+							my_custom_fops->release =
+								custom_release; // Hook release
+							f->f_op =
+								my_custom_fops;
+							f->private_data =
+								data; // Store custom data in file object
+							pr_info("cw3: custom_read() hook installed for file %s with key %u\n",
+								tmp, key);
+						} else {
+							kfree(data);
+							kfree(my_custom_fops);
+							pr_err("cw3: Failed to allocate memory for custom fops or data\n");
+						}
 					} else {
-						kfree(data);
-						kfree(my_custom_fops);
-						pr_err("cw3: Failed to allocate memory for custom fops or data\n");
+						pr_info("cw3: Not hooking read for file: %s\n",
+							tmp);
 					}
 				} else {
-					pr_info("cw3: Not hooking read for file: %s\n",
+					pr_info("cw3: Invalid key value in xattr for file %s\n",
 						tmp);
 				}
-			} else {
-				pr_info("cw3: Invalid key value in xattr for file %s\n",
-					tmp);
 			}
 		}
 	}
