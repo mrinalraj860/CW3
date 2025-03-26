@@ -467,159 +467,40 @@ EXPORT_SYMBOL(kernel_read);
 
 //CW3
 
-// ssize_t custom_read(struct file *file, char __user *buf, size_t count,
-// 		    loff_t *pos)
-// {
-// 	ssize_t ret;
-// 	char *kbuf;
-// 	unsigned char key;
-// 	int xlen;
-
-// 	pr_info("cw3: custom_read() called for file: %s\n",
-// 		file->f_path.dentry->d_name.name);
-
-// 	kbuf = kmalloc(count, GFP_KERNEL);
-// 	if (!kbuf)
-// 		return -ENOMEM;
-
-// 	/* Use normal read into kernel buffer */
-// 	ret = kernel_read(file, kbuf, count, pos);
-// 	if (ret <= 0)
-// 		goto out;
-
-// 	/* Get xattr using correct API */
-// 	xlen = vfs_getxattr(mnt_idmap(file->f_path.mnt), file->f_path.dentry,
-// 			    "user.cw3_encrypt", &key, sizeof(key));
-// 	pr_info("cw3: vfs_getxattr xlen = %d\n", xlen);
-// 	if (xlen > 0) {
-// 		for (ssize_t i = 0; i < ret; i++)
-// 			kbuf[i] ^= key;
-// 	}
-
-// 	if (copy_to_user(buf, kbuf, ret))
-// 		ret = -EFAULT;
-
-// out:
-// 	kfree(kbuf);
-// 	return ret;
-// }
-ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+ssize_t custom_read(struct file *file, char __user *buf, size_t count,
+		    loff_t *pos)
 {
 	ssize_t ret;
 	char *kbuf;
-	char key_buf[8];
-	int key, i, xattr_len;
-	struct kiocb kiocb;
-	struct iov_iter iter;
-	struct iovec iov_user;
-	struct kvec iov_kernel;
+	unsigned char key;
+	int xlen;
 
-	if (!(file->f_mode & FMODE_READ))
-		return -EBADF;
-	if (!(file->f_mode & FMODE_CAN_READ))
-		return -EINVAL;
-	if (unlikely(!access_ok(buf, count)))
-		return -EFAULT;
+	pr_info("cw3: custom_read() called for file: %s\n",
+		file->f_path.dentry->d_name.name);
 
-	ret = rw_verify_area(READ, file, pos, count);
-	if (ret)
-		return ret;
+	kbuf = kmalloc(count, GFP_KERNEL);
+	if (!kbuf)
+		return -ENOMEM;
 
-	if (count > MAX_RW_COUNT)
-		count = MAX_RW_COUNT;
+	/* Use normal read into kernel buffer */
+	ret = kernel_read(file, kbuf, count, pos);
+	if (ret <= 0)
+		goto out;
 
-	// First, check encryption attribute properly
-	xattr_len = vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
-				 "user.cw3_encrypt", key_buf,
-				 sizeof(key_buf) - 1);
-
-	if (xattr_len > 0) {
-		key_buf[xattr_len] = '\0';
-		if (kstrtoint(key_buf, 10, &key) != 0 || key < 0 || key > 255)
-			key = 0; // fallback to no encryption if invalid key
-
-		// Allocate kernel buffer for encryption case
-		kbuf = kmalloc(count, GFP_KERNEL);
-		if (!kbuf)
-			return -ENOMEM;
-
-		// Initialize kiocb
-		init_sync_kiocb(&kiocb, file);
-		kiocb.ki_pos = *pos;
-
-		iov_kernel.iov_base = kbuf;
-		iov_kernel.iov_len = count;
-		iov_iter_kvec(&iter, READ, &iov_kernel, 1, count);
-
-		if (!file || !file->f_op)
-			return -EINVAL;
-
-		// Perform read_iter safely
-		if (file->f_op && file->f_op->read_iter) {
-			ret = file->f_op->read_iter(&kiocb, &iter);
-		} else if (file->f_op && file->f_op->read) {
-			// Safely read into user buffer first, then copy to kernel buffer
-			ret = file->f_op->read(file, buf, count, pos);
-			if (ret <= 0) {
-				kfree(kbuf);
-				return ret;
-			}
-			if (copy_from_user(kbuf, buf, ret)) {
-				kfree(kbuf);
-				return -EFAULT;
-			}
-			kiocb.ki_pos = *pos;
-		} else {
-			kfree(kbuf);
-			return -EINVAL;
-		}
-
-		if (ret <= 0) {
-			kfree(kbuf);
-			return ret;
-		}
-
-		*pos = kiocb.ki_pos;
-
-		// XOR encryption only if valid key
-		if (key != 0) {
-			for (i = 0; i < ret; i++)
-				kbuf[i] ^= (char)key;
-		}
-
-		// Copy encrypted data back to user safely
-		if (copy_to_user(buf, kbuf, ret)) {
-			kfree(kbuf);
-			return -EFAULT;
-		}
-
-		kfree(kbuf);
-	} else {
-		// NO ENCRYPTION: Perform normal read operation safely using original methods
-		if (file->f_op && file->f_op->read_iter) {
-			init_sync_kiocb(&kiocb, file);
-			kiocb.ki_pos = *pos;
-
-			iov_user.iov_base = buf;
-			iov_user.iov_len = count;
-			iov_iter_init(&iter, READ, &iov_user, 1, count);
-
-			ret = file->f_op->read_iter(&kiocb, &iter);
-			*pos = kiocb.ki_pos;
-		} else if (file->f_op && file->f_op->read) {
-			ret = file->f_op->read(file, buf, count, pos);
-		} else {
-			return -EINVAL;
-		}
-
-		if (ret <= 0)
-			return ret;
+	/* Get xattr using correct API */
+	xlen = vfs_getxattr(mnt_idmap(file->f_path.mnt), file->f_path.dentry,
+			    "user.cw3_encrypt", &key, sizeof(key));
+	pr_info("cw3: vfs_getxattr xlen = %d\n", xlen);
+	if (xlen > 0) {
+		for (ssize_t i = 0; i < ret; i++)
+			kbuf[i] ^= key;
 	}
 
-	fsnotify_access(file);
-	add_rchar(current, ret);
-	inc_syscr(current);
+	if (copy_to_user(buf, kbuf, ret))
+		ret = -EFAULT;
 
+out:
+	kfree(kbuf);
 	return ret;
 }
 
