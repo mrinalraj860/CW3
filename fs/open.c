@@ -949,6 +949,7 @@ static int do_dentry_open(struct file *f,
 		int xlen = vfs_getxattr(mnt_idmap(f->f_path.mnt),
 					f->f_path.dentry, "user.cw3_encrypt",
 					&dummy, 1);
+		printk("Inside do_dentry_open\n");
 		if (xlen > 0) {
 			struct file_operations *my_custom_fops;
 
