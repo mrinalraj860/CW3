@@ -10,6 +10,8 @@
 #include <linux/file.h>
 #include <linux/fdtable.h>
 #include <linux/fsnotify.h>
+#include <linux/dcache.h>
+#include <linux/path.h>
 #include <linux/module.h>
 #include <linux/tty.h>
 #include <linux/namei.h>
@@ -954,20 +956,24 @@ static int do_dentry_open(struct file *f,
 			"user.cw3_encrypt", key_buf,
 			sizeof(key_buf) - 1); // leave space for null
 
-		pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
-			f->f_path.dentry->d_name.name);
-
-		if (xlen > 0) {
-			key_buf[xlen] = '\0'; // Null-terminate string
-			struct file_operations *my_custom_fops = kmalloc(
-				sizeof(struct file_operations), GFP_KERNEL);
-			if (my_custom_fops) {
-				memcpy(my_custom_fops, f->f_op,
-				       sizeof(struct file_operations));
-				my_custom_fops->read = custom_read;
-				f->f_op = my_custom_fops;
-				pr_info("cw3: custom_read() hook installed for file %s\n",
-					f->f_path.dentry->d_name.name);
+		char fullpath[PATH_MAX];
+		char *tmp = d_path(&f->f_path, fullpath, sizeof(fullpath));
+		if (!IS_ERR(tmp)) {
+			pr_info("cw3: do_dentry_open xlen = %d for %s\n", xlen,
+				tmp);
+			if (xlen > 0) {
+				key_buf[xlen] = '\0'; // Null-terminate string
+				struct file_operations *my_custom_fops =
+					kmalloc(sizeof(struct file_operations),
+						GFP_KERNEL);
+				if (my_custom_fops) {
+					memcpy(my_custom_fops, f->f_op,
+					       sizeof(struct file_operations));
+					my_custom_fops->read = custom_read;
+					f->f_op = my_custom_fops;
+					pr_info("cw3: custom_read() hook installed for file %s\n",
+						f->f_path.dentry->d_name.name);
+				}
 			}
 		}
 	}
