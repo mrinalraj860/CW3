@@ -538,7 +538,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
 	char *kbuf = NULL;
-	char key_buf[8];
+	char key_buf[9]; // Increased size to accommodate potential null terminator
 	int key, i, xattr_len;
 	struct kiocb kiocb;
 	struct iov_iter iter;
@@ -572,10 +572,11 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 	// Safely perform read_iter if available
 	if (file->f_op->read_iter) {
-		ret = file->f_op->read_iter(&kiocb, &iter);
+		ret = call_read_iter(file, &kiocb, &iter);
 	} else if (file->f_op->read) {
-		ret = file->f_op->read(file, kbuf, count, pos);
-		kiocb.ki_pos = *pos; // update position explicitly
+		ret = file->f_op->read(file, kbuf, count, &kiocb.ki_pos);
+		if (ret > 0)
+			*pos = kiocb.ki_pos; // update position explicitly on success
 	} else {
 		kfree(kbuf);
 		return -EINVAL;
@@ -586,14 +587,12 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		return ret;
 	}
 
-	*pos = kiocb.ki_pos;
-
 	// Fetch encryption key safely
 	xattr_len = vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
 				 "user.cw3_encrypt", key_buf,
 				 sizeof(key_buf) - 1);
 
-	if (xattr_len > 0) {
+	if (xattr_len > 0 && xattr_len < sizeof(key_buf)) {
 		key_buf[xattr_len] = '\0';
 		if (kstrtoint(key_buf, 10, &key) == 0) {
 			for (i = 0; i < ret; i++)
@@ -601,7 +600,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		}
 	}
 
-	// Carefully copy back encrypted data to user-space
+	// Carefully copy back (potentially) decrypted data to user-space
 	if (copy_to_user(buf, kbuf, ret)) {
 		kfree(kbuf);
 		return -EFAULT;
