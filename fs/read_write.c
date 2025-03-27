@@ -528,11 +528,14 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	ret = kernel_read(file, kbuf, count,
 			  pos); // modern alternative to read+set_fs
 	if (ret > 0) {
-		char keybuf[4] = { 0 }; // Max 3-digit + null terminator
+		struct inode *inode = file_inode(file);
+		char keybuf[4] = { 0 }; // max 3-digit + null
 		unsigned char xor_key;
 		int xret;
 
-		if (S_ISREG(file_inode(file)->i_mode)) {
+		// 🔐 Check: Only apply XOR if it's a regular file on a real disk fs
+		if (S_ISREG(inode->i_mode) &&
+		    !(inode->i_sb->s_flags & SB_NOUSER)) {
 			struct dentry *dentry = file->f_path.dentry;
 			struct mnt_idmap *idmap = file_mnt_idmap(file);
 
@@ -546,7 +549,6 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 			}
 		}
 
-		// Copy XOR'd data to user-space
 		if (copy_to_user(buf, kbuf, ret)) {
 			kfree(kbuf);
 			return -EFAULT;
@@ -555,10 +557,6 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
-
-	kfree(kbuf);
-	inc_syscr(current);
-	return ret;
 }
 
 static ssize_t new_sync_write(struct file *filp, const char __user *buf,
