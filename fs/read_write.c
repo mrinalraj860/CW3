@@ -467,62 +467,36 @@ EXPORT_SYMBOL(kernel_read);
 
 //CW3
 
-ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+ssize_t vfs_write(struct file *file, const char __user *buf, size_t count,
+		  loff_t *pos)
 {
 	ssize_t ret;
-	char *kbuf = NULL;
 
-	if (!(file->f_mode & FMODE_READ))
+	if (!(file->f_mode & FMODE_WRITE))
 		return -EBADF;
-	if (!(file->f_mode & FMODE_CAN_READ))
+	if (!(file->f_mode & FMODE_CAN_WRITE))
 		return -EINVAL;
 	if (unlikely(!access_ok(buf, count)))
 		return -EFAULT;
 
-	ret = rw_verify_area(READ, file, pos, count);
+	ret = rw_verify_area(WRITE, file, pos, count);
 	if (ret)
 		return ret;
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
-
-	kbuf = kmalloc(count, GFP_KERNEL);
-	if (!kbuf)
-		return -ENOMEM;
-
-	ret = kernel_read(file, kbuf, count, pos);
-
+	file_start_write(file);
+	if (file->f_op->write)
+		ret = file->f_op->write(file, buf, count, pos);
+	else if (file->f_op->write_iter)
+		ret = new_sync_write(file, buf, count, pos);
+	else
+		ret = -EINVAL;
 	if (ret > 0) {
-		struct inode *inode = file_inode(file);
-
-		// 🔒 Extra check: Skip XOR logic for kernel/system processes
-		if (current->pid != 1 && S_ISREG(inode->i_mode) &&
-		    !(inode->i_sb->s_flags & SB_NOUSER)) {
-			char keybuf[4] = { 0 };
-			unsigned char xor_key;
-			int xret;
-
-			struct dentry *dentry = file->f_path.dentry;
-			struct mnt_idmap *idmap = file_mnt_idmap(file);
-
-			xret = vfs_getxattr(idmap, dentry, "user.cw3_encrypt",
-					    keybuf, sizeof(keybuf));
-			if (xret > 0 && kstrtou8(keybuf, 10, &xor_key) == 0) {
-				for (int i = 0; i < ret; ++i)
-					kbuf[i] ^= xor_key;
-			}
-		}
-
-		if (copy_to_user(buf, kbuf, ret)) {
-			kfree(kbuf);
-			return -EFAULT;
-		}
-
-		fsnotify_access(file);
-		add_rchar(current, ret);
+		fsnotify_modify(file);
+		add_wchar(current, ret);
 	}
-
-	kfree(kbuf);
-	inc_syscr(current);
+	inc_syscw(current);
+	file_end_write(file);
 	return ret;
 }
 
