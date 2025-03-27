@@ -532,16 +532,17 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		unsigned char xor_key;
 		int xret;
 
-		struct dentry *dentry = file->f_path.dentry;
-		struct mnt_idmap *idmap = file_mnt_idmap(file);
+		if (S_ISREG(file_inode(file)->i_mode)) {
+			struct dentry *dentry = file->f_path.dentry;
+			struct mnt_idmap *idmap = file_mnt_idmap(file);
 
-		// Get xattr: user.cw3_encrypt
-		xret = vfs_getxattr(idmap, dentry, "user.cw3_encrypt", keybuf,
-				    sizeof(keybuf));
-		if (xret > 0) {
-			if (kstrtou8(keybuf, 10, &xor_key) == 0) {
-				for (int i = 0; i < ret; ++i)
-					kbuf[i] ^= xor_key;
+			xret = vfs_getxattr(idmap, dentry, "user.cw3_encrypt",
+					    keybuf, sizeof(keybuf));
+			if (xret > 0) {
+				if (kstrtou8(keybuf, 10, &xor_key) == 0) {
+					for (int i = 0; i < ret; ++i)
+						kbuf[i] ^= xor_key;
+				}
 			}
 		}
 
