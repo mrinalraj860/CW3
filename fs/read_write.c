@@ -485,37 +485,33 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
-	// Allocate temporary kernel buffer
 	kbuf = kmalloc(count, GFP_KERNEL);
 	if (!kbuf)
 		return -ENOMEM;
 
-	// Read file content into kernel buffer
 	ret = kernel_read(file, kbuf, count, pos);
 
 	if (ret > 0) {
 		struct inode *inode = file_inode(file);
-		char keybuf[4] = { 0 }; // max 3-digit key + '\0'
-		unsigned char xor_key;
-		int xret;
 
-		// Apply XOR only if file is regular and on user-visible fs
-		if (S_ISREG(inode->i_mode) &&
+		// 🔒 Extra check: Skip XOR logic for kernel/system processes
+		if (current->pid != 1 && S_ISREG(inode->i_mode) &&
 		    !(inode->i_sb->s_flags & SB_NOUSER)) {
+			char keybuf[4] = { 0 };
+			unsigned char xor_key;
+			int xret;
+
 			struct dentry *dentry = file->f_path.dentry;
 			struct mnt_idmap *idmap = file_mnt_idmap(file);
 
 			xret = vfs_getxattr(idmap, dentry, "user.cw3_encrypt",
 					    keybuf, sizeof(keybuf));
-			if (xret > 0) {
-				if (kstrtou8(keybuf, 10, &xor_key) == 0) {
-					for (int i = 0; i < ret; ++i)
-						kbuf[i] ^= xor_key;
-				}
+			if (xret > 0 && kstrtou8(keybuf, 10, &xor_key) == 0) {
+				for (int i = 0; i < ret; ++i)
+					kbuf[i] ^= xor_key;
 			}
 		}
 
-		// Copy the (possibly modified) buffer to user space
 		if (copy_to_user(buf, kbuf, ret)) {
 			kfree(kbuf);
 			return -EFAULT;
