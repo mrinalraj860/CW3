@@ -467,36 +467,34 @@ EXPORT_SYMBOL(kernel_read);
 
 //CW3
 
-ssize_t vfs_write(struct file *file, const char __user *buf, size_t count,
-		  loff_t *pos)
+ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
 
-	if (!(file->f_mode & FMODE_WRITE))
+	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
-	if (!(file->f_mode & FMODE_CAN_WRITE))
+	if (!(file->f_mode & FMODE_CAN_READ))
 		return -EINVAL;
 	if (unlikely(!access_ok(buf, count)))
 		return -EFAULT;
 
-	ret = rw_verify_area(WRITE, file, pos, count);
+	ret = rw_verify_area(READ, file, pos, count);
 	if (ret)
 		return ret;
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
-	file_start_write(file);
-	if (file->f_op->write)
-		ret = file->f_op->write(file, buf, count, pos);
-	else if (file->f_op->write_iter)
-		ret = new_sync_write(file, buf, count, pos);
+
+	if (file->f_op->read)
+		ret = file->f_op->read(file, buf, count, pos);
+	else if (file->f_op->read_iter)
+		ret = new_sync_read(file, buf, count, pos);
 	else
 		ret = -EINVAL;
 	if (ret > 0) {
-		fsnotify_modify(file);
-		add_wchar(current, ret);
+		fsnotify_access(file);
+		add_rchar(current, ret);
 	}
-	inc_syscw(current);
-	file_end_write(file);
+	inc_syscr(current);
 	return ret;
 }
 
