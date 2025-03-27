@@ -498,12 +498,13 @@ EXPORT_SYMBOL(kernel_read);
 // 	return ret;
 // }
 
+#include <linux/xattr.h>
+#include <linux/slab.h> // for kmalloc and kfree
+
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
-	char key_str[16]; // Assuming a max size for the key string
-	int key_len = 0;
-	int key;
+	char *kbuf = NULL;
 
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
@@ -518,47 +519,46 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
-	if (file->f_op->read)
-		ret = file->f_op->read(file, buf, count, pos);
-	else if (file->f_op->read_iter)
-		ret = new_sync_read(file, buf, count, pos);
-	else
-		ret = -EINVAL;
+	// Step 1: Allocate a temporary kernel buffer
+	kbuf = kmalloc(count, GFP_KERNEL);
+	if (!kbuf)
+		return -ENOMEM;
 
-	ret = vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt", key_str,
-			   sizeof(key_str));
-	if (ret > 0) {
-		key_len = ret;
-		// 2. Convert the key to an integer
-		ret = kstrtoint(key_str, 10, &key);
-		if (ret < 0 || key < 0 || key > 255) {
-			// Handle error (e.g., invalid key)
-			return -EINVAL;
-		}
-		ret = vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt",
-				   key_str, sizeof(key_str));
-		if (ret > 0) {
-			key_len = ret;
-			// 2. Convert the key to an integer
-			ret = kstrtoint(key_str, 10, &key);
-			if (ret < 0 || key < 0 || key > 255) {
-				// Handle error (e.g., invalid key)
-				return -EINVAL;
-			}
-			ret = file->f_op->read(file, buf, count, pos);
-			if (ret > 0) {
-				// 3. XOR encryption
-				for (int i = 0; i < ret; i++) {
-					buf[i] = buf[i] ^ key; // XOR operation
-				}
-			}
-		}
+	// Step 2: Read into kernel buffer
+	if (file->f_op->read) {
+		mm_segment_t old_fs = get_fs();
+		set_fs(KERNEL_DS);
+		ret = file->f_op->read(file, kbuf, count, pos);
+		set_fs(old_fs);
+	} else if (file->f_op->read_iter) {
+		ret = kernel_read(file, kbuf, count, pos);
+	} else {
+		ret = -EINVAL;
 	}
 
+	// Step 3: If successful, check for xattr
 	if (ret > 0) {
+		char keybuf[4] = { 0 }; // max "255\0"
+		int xret = vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt",
+					keybuf, sizeof(keybuf));
+		if (xret > 0) {
+			unsigned char xor_key =
+				(unsigned char)simple_strtoul(keybuf, NULL, 10);
+			for (int i = 0; i < ret; ++i)
+				kbuf[i] ^= xor_key;
+		}
+
+		// Step 4: Copy the (modified or unmodified) data to user
+		if (copy_to_user(buf, kbuf, ret)) {
+			kfree(kbuf);
+			return -EFAULT;
+		}
+
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
+
+	kfree(kbuf);
 	inc_syscr(current);
 	return ret;
 }
