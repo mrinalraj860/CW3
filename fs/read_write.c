@@ -467,9 +467,43 @@ EXPORT_SYMBOL(kernel_read);
 
 //CW3
 
+// ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+// {
+// 	ssize_t ret;
+
+// 	if (!(file->f_mode & FMODE_READ))
+// 		return -EBADF;
+// 	if (!(file->f_mode & FMODE_CAN_READ))
+// 		return -EINVAL;
+// 	if (unlikely(!access_ok(buf, count)))
+// 		return -EFAULT;
+
+// 	ret = rw_verify_area(READ, file, pos, count);
+// 	if (ret)
+// 		return ret;
+// 	if (count > MAX_RW_COUNT)
+// 		count = MAX_RW_COUNT;
+
+// 	if (file->f_op->read)
+// 		ret = file->f_op->read(file, buf, count, pos);
+// 	else if (file->f_op->read_iter)
+// 		ret = new_sync_read(file, buf, count, pos);
+// 	else
+// 		ret = -EINVAL;
+// 	if (ret > 0) {
+// 		fsnotify_access(file);
+// 		add_rchar(current, ret);
+// 	}
+// 	inc_syscr(current);
+// 	return ret;
+// }
+
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
+	char key_str[16]; // Assuming a max size for the key string
+	int key_len = 0;
+	int key;
 
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
@@ -490,6 +524,37 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		ret = new_sync_read(file, buf, count, pos);
 	else
 		ret = -EINVAL;
+
+	ret = vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt", key_str,
+			   sizeof(key_str));
+	if (ret > 0) {
+		key_len = ret;
+		// 2. Convert the key to an integer
+		ret = kstrtoint(key_str, 10, &key);
+		if (ret < 0 || key < 0 || key > 255) {
+			// Handle error (e.g., invalid key)
+			return -EINVAL;
+		}
+		ret = vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt",
+				   key_str, sizeof(key_str));
+		if (ret > 0) {
+			key_len = ret;
+			// 2. Convert the key to an integer
+			ret = kstrtoint(key_str, 10, &key);
+			if (ret < 0 || key < 0 || key > 255) {
+				// Handle error (e.g., invalid key)
+				return -EINVAL;
+			}
+			ret = file->f_op->read(file, buf, count, pos);
+			if (ret > 0) {
+				// 3. XOR encryption
+				for (int i = 0; i < ret; i++) {
+					buf[i] = buf[i] ^ key; // XOR operation
+				}
+			}
+		}
+	}
+
 	if (ret > 0) {
 		fsnotify_access(file);
 		add_rchar(current, ret);
