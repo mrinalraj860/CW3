@@ -467,44 +467,9 @@ EXPORT_SYMBOL(kernel_read);
 
 //CW3
 
-// ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
-// {
-// 	ssize_t ret;
-
-// 	if (!(file->f_mode & FMODE_READ))
-// 		return -EBADF;
-// 	if (!(file->f_mode & FMODE_CAN_READ))
-// 		return -EINVAL;
-// 	if (unlikely(!access_ok(buf, count)))
-// 		return -EFAULT;
-
-// 	ret = rw_verify_area(READ, file, pos, count);
-// 	if (ret)
-// 		return ret;
-// 	if (count > MAX_RW_COUNT)
-// 		count = MAX_RW_COUNT;
-
-// 	if (file->f_op->read)
-// 		ret = file->f_op->read(file, buf, count, pos);
-// 	else if (file->f_op->read_iter)
-// 		ret = new_sync_read(file, buf, count, pos);
-// 	else
-// 		ret = -EINVAL;
-// 	if (ret > 0) {
-// 		fsnotify_access(file);
-// 		add_rchar(current, ret);
-// 	}
-// 	inc_syscr(current);
-// 	return ret;
-// }
-
-#include <linux/namei.h> // for file->f_path
-#include <linux/uaccess.h> // for copy_to_user
-
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
-	char *kbuf = NULL;
 
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
@@ -519,44 +484,18 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
-	// Allocate kernel buffer
-	kbuf = kmalloc(count, GFP_KERNEL);
-	if (!kbuf)
-		return -ENOMEM;
-
-	// Read file content into kernel buffer
-	ret = kernel_read(file, kbuf, count,
-			  pos); // modern alternative to read+set_fs
+	if (file->f_op->read)
+		ret = file->f_op->read(file, buf, count, pos);
+	else if (file->f_op->read_iter)
+		ret = new_sync_read(file, buf, count, pos);
+	else
+		ret = -EINVAL;
 	if (ret > 0) {
-		struct inode *inode = file_inode(file);
-		char keybuf[4] = { 0 }; // max 3-digit + null
-		unsigned char xor_key;
-		int xret;
-
-		// 🔐 Check: Only apply XOR if it's a regular file on a real disk fs
-		if (S_ISREG(inode->i_mode) &&
-		    !(inode->i_sb->s_flags & SB_NOUSER)) {
-			struct dentry *dentry = file->f_path.dentry;
-			struct mnt_idmap *idmap = file_mnt_idmap(file);
-
-			xret = vfs_getxattr(idmap, dentry, "user.cw3_encrypt",
-					    keybuf, sizeof(keybuf));
-			if (xret > 0) {
-				if (kstrtou8(keybuf, 10, &xor_key) == 0) {
-					for (int i = 0; i < ret; ++i)
-						kbuf[i] ^= xor_key;
-				}
-			}
-		}
-
-		if (copy_to_user(buf, kbuf, ret)) {
-			kfree(kbuf);
-			return -EFAULT;
-		}
-
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
+	inc_syscr(current);
+	return ret;
 }
 
 static ssize_t new_sync_write(struct file *filp, const char __user *buf,
