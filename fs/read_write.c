@@ -498,8 +498,8 @@ EXPORT_SYMBOL(kernel_read);
 // 	return ret;
 // }
 
-#include <linux/xattr.h>
-#include <linux/slab.h> // for kmalloc and kfree
+#include <linux/namei.h> // for file->f_path
+#include <linux/uaccess.h> // for copy_to_user
 
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
@@ -519,36 +519,33 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
-	// Step 1: Allocate a temporary kernel buffer
+	// Allocate kernel buffer
 	kbuf = kmalloc(count, GFP_KERNEL);
 	if (!kbuf)
 		return -ENOMEM;
 
-	// Step 2: Read into kernel buffer
-	if (file->f_op->read) {
-		mm_segment_t old_fs = get_fs();
-		set_fs(KERNEL_DS);
-		ret = file->f_op->read(file, kbuf, count, pos);
-		set_fs(old_fs);
-	} else if (file->f_op->read_iter) {
-		ret = kernel_read(file, kbuf, count, pos);
-	} else {
-		ret = -EINVAL;
-	}
-
-	// Step 3: If successful, check for xattr
+	// Read file content into kernel buffer
+	ret = kernel_read(file, kbuf, count,
+			  pos); // modern alternative to read+set_fs
 	if (ret > 0) {
-		char keybuf[4] = { 0 }; // max "255\0"
-		int xret = vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt",
-					keybuf, sizeof(keybuf));
+		char keybuf[4] = { 0 }; // Max 3-digit + null terminator
+		unsigned char xor_key;
+		int xret;
+
+		struct dentry *dentry = file->f_path.dentry;
+		struct mnt_idmap *idmap = file_mnt_idmap(file);
+
+		// Get xattr: user.cw3_encrypt
+		xret = vfs_getxattr(idmap, dentry, "user.cw3_encrypt", keybuf,
+				    sizeof(keybuf));
 		if (xret > 0) {
-			unsigned char xor_key =
-				(unsigned char)simple_strtoul(keybuf, NULL, 10);
-			for (int i = 0; i < ret; ++i)
-				kbuf[i] ^= xor_key;
+			if (kstrtou8(keybuf, 10, &xor_key) == 0) {
+				for (int i = 0; i < ret; ++i)
+					kbuf[i] ^= xor_key;
+			}
 		}
 
-		// Step 4: Copy the (modified or unmodified) data to user
+		// Copy XOR'd data to user-space
 		if (copy_to_user(buf, kbuf, ret)) {
 			kfree(kbuf);
 			return -EFAULT;
