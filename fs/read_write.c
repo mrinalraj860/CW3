@@ -501,7 +501,8 @@ EXPORT_SYMBOL(kernel_read);
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
-
+	char key_str[256]; // Buffer to hold the key
+	struct dentry *dentry = file->f_path.dentry;
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
 	if (!(file->f_mode & FMODE_CAN_READ))
@@ -526,22 +527,18 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	else
 		ret = -EINVAL;
 	if (ret > 0) {
-		char key_str[256]; // Buffer to hold the key
 		printk("file->f_path.dentry: %s\n",
 		       file->f_path.dentry->d_name.name);
-		if (!vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt",
-				  key_str, sizeof(key_str))) {
-			unsigned char key = (unsigned char)simple_strtoul(
-				key_str, NULL, 10);
+		if (!vfs_getxattr(dentry, "user.cw3_encrypt", key_str,
+				  sizeof(key_str)) > 0) {
+			unsigned char key = simple_strtoul(key_str, NULL, 10);
 			for (int i = 0; i < ret; ++i) {
 				temp_buf[i] ^= key;
 			}
 		}
 
-		// Copy the potentially modified buffer back to user space
-		if (copy_to_user(buf, temp_buf, ret)) {
+		if (copy_to_user(buf, temp_buf, ret))
 			ret = -EFAULT;
-		}
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
