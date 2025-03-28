@@ -497,16 +497,16 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 					     xattr_value,
 					     sizeof(xattr_value) - 1);
 		if (xattr_len > 0) {
-			pr_info("xattr_len: %d\n", xattr_len);
-			for (size_t i = 0; i < 4; i++) {
-				pr_info("xattr_value[%zu]: %c\n", i,
-					xattr_value[i]);
-			}
+			// pr_info("xattr_len: %d\n", xattr_len);
+			// for (size_t i = 0; i < 4; i++) {
+			// 	pr_info("xattr_value[%zu]: %c\n", i,
+			// 		xattr_value[i]);
+			// }
 			int value = 0;
 			for (int i = 0; i < 4; i++) {
 				if (xattr_value[i] != 0) {
-					pr_info("value is %d and xttr is %d\n",
-						value, xattr_value[i]);
+					// pr_info("value is %d and xttr is %d\n",
+					// 	value, xattr_value[i]);
 					value = value * 10 +
 						(xattr_value[i] - 48);
 				} else {
@@ -515,7 +515,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 			}
 			if (value > 255)
 				value = 255;
-
+			pr_info("returned value: %d\n", ret);
 			pr_info("Converted value: %u\n", value);
 		}
 		fsnotify_access(file);
