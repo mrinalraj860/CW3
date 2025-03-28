@@ -529,8 +529,9 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (ret > 0) {
 		printk("file->f_path.dentry: %s\n",
 		       file->f_path.dentry->d_name.name);
-		if (!vfs_getxattr(dentry, "user.cw3_encrypt", key_str,
-				  sizeof(key_str)) > 0) {
+		if (!vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
+				  "user.cw3_encrypt", key_str,
+				  sizeof(key_str) - 1)) {
 			unsigned char key = simple_strtoul(key_str, NULL, 10);
 			for (int i = 0; i < ret; ++i) {
 				temp_buf[i] ^= key;
