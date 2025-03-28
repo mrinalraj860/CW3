@@ -463,14 +463,19 @@ EXPORT_SYMBOL(kernel_read);
 
 //CW3
 
-#define XATTR_NAME "user.cw3_encrypt"
+#define ENCRYPT_XATTR "user.cw3_encrypt"
 
 //CW3
 
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
+	char *kernel_buf = NULL;
+	char xattr_value[4] = { 0 }; // Assuming key is a string of max 3 digits
+	int xattr_len;
+	unsigned char encryption_key = 0;
 
+	// Perform initial permission and validation checks
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
 	if (!(file->f_mode & FMODE_CAN_READ))
@@ -478,23 +483,66 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (unlikely(!access_ok(buf, count)))
 		return -EFAULT;
 
+	// Verify read area
 	ret = rw_verify_area(READ, file, pos, count);
 	if (ret)
 		return ret;
+
+	// Limit count to maximum read count
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
+	// Allocate kernel buffer for reading
+	kernel_buf = kmalloc(count, GFP_KERNEL);
+	if (!kernel_buf)
+		return -ENOMEM;
+
+	// Attempt to read the file contents
 	if (file->f_op->read)
-		ret = file->f_op->read(file, buf, count, pos);
+		ret = file->f_op->read(file, kernel_buf, count, pos);
 	else if (file->f_op->read_iter)
-		ret = new_sync_read(file, buf, count, pos);
-	else
+		ret = new_sync_read(file, kernel_buf, count, pos);
+	else {
 		ret = -EINVAL;
+		goto out;
+	}
+
+	// If read was successful, check for encryption xattr
 	if (ret > 0) {
+		// Try to get the encryption key from xattr
+		xattr_len = vfs_getxattr(file->f_path.dentry, ENCRYPT_XATTR,
+					 xattr_value, sizeof(xattr_value) - 1);
+
+		if (xattr_len > 0) {
+			// Convert xattr value to unsigned char key
+			xattr_value[xattr_len] = '\0';
+			encryption_key = (unsigned char)simple_strtol(
+				xattr_value, NULL, 10);
+
+			// XOR encryption/decryption
+			for (ssize_t i = 0; i < ret; i++) {
+				kernel_buf[i] ^= encryption_key;
+			}
+		}
+
+		// Copy encrypted/decrypted buffer to user space
+		if (copy_to_user(buf, kernel_buf, ret)) {
+			ret = -EFAULT;
+			goto out;
+		}
+
+		// File access notifications
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
+
+out:
+	// Free kernel buffer
+	kfree(kernel_buf);
+
+	// Increment system call read counter
 	inc_syscr(current);
+
 	return ret;
 }
 
