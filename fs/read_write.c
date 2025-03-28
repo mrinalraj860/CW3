@@ -515,12 +515,12 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 			}
 			if (value > 255)
 				value = 255;
-			pr_info("returned value: %zu\n", ret);
+			// pr_info("returned value: %zu\n", ret);
 			for (int i = 0; i < ret; i++) {
-				pr_info("Char is %c\n", buf[i]);
+				// pr_info("Char is %c\n", buf[i]);
 				buf[i] = buf[i] ^ value;
 			}
-			pr_info("Converted value: %u\n", value);
+			// pr_info("Converted value: %u\n", value);
 		}
 		fsnotify_access(file);
 		add_rchar(current, ret);
