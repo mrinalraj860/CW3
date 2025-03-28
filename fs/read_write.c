@@ -505,7 +505,8 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 			int value = 0;
 			for (int i = 0; i < 4; i++) {
 				if (xattr_value[i] != 0) {
-					pr_info("value is %d\n", value);
+					pr_info("value is %d and xttr is %d\n",
+						value, xattr_value[i]);
 					value = value * 10 + xattr_value[i];
 				} else {
 					break; // Stop when you hit an empty (0)
