@@ -583,10 +583,10 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		kvec.iov_len = count;
 		iov_iter_kvec(&iter, READ, &kvec, 1, count);
 
-		ret = call_read_iter(file, &kiocb, &iter);
+		ret = file->f_op->read_iter(&kiocb, &iter);
 		*pos = kiocb.ki_pos;
 	} else {
-		// Safe in-kernel read fallback
+		// Fallback to kernel_read if read_iter is not defined
 		ret = kernel_read(file, temp_buf, count, pos);
 	}
 
