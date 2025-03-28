@@ -557,12 +557,13 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		return -EBADF;
 	if (!(file->f_mode & FMODE_CAN_READ))
 		return -EINVAL;
-	if (unlikely(!access_ok(buf, count)))
+	if (!access_ok(buf, count))
 		return -EFAULT;
 
 	ret = rw_verify_area(READ, file, pos, count);
 	if (ret)
 		return ret;
+
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
@@ -570,8 +571,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (!temp_buf)
 		return -ENOMEM;
 
-	// Always read into kernel buffer first
-	if (file->f_op && file->f_op->read_iter) {
+	if (file->f_op->read_iter) {
 		struct kiocb kiocb;
 		struct iov_iter iter;
 		struct kvec kvec;
@@ -583,21 +583,14 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		kvec.iov_len = count;
 		iov_iter_kvec(&iter, READ, &kvec, 1, count);
 
-		ret = file->f_op->read_iter(&kiocb, &iter);
+		ret = call_read_iter(file, &kiocb, &iter);
 		*pos = kiocb.ki_pos;
-	} else if (file->f_op && file->f_op->read) {
-		// Read directly into kernel buffer
-		mm_segment_t old_fs = get_fs();
-		set_fs(KERNEL_DS);
-		ret = file->f_op->read(file, temp_buf, count, pos);
-		set_fs(old_fs);
 	} else {
-		kfree(temp_buf);
-		return -EINVAL;
+		// Safe in-kernel read fallback
+		ret = kernel_read(file, temp_buf, count, pos);
 	}
 
 	if (ret > 0) {
-		key_str[0] = '\0';
 		if (vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
 				 "user.cw3_encrypt", key_str,
 				 sizeof(key_str) - 1) > 0) {
@@ -606,10 +599,8 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 				temp_buf[i] ^= key;
 		}
 
-		if (copy_to_user(buf, temp_buf, ret)) {
-			kfree(temp_buf);
-			return -EFAULT;
-		}
+		if (copy_to_user(buf, temp_buf, ret))
+			ret = -EFAULT;
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
