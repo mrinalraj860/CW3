@@ -502,7 +502,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
 	char key_str[256]; // Buffer to hold the key
-	struct dentry *dentry = file->f_path.dentry;
+	// struct dentry *dentry = file->f_path.dentry;
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
 	if (!(file->f_mode & FMODE_CAN_READ))
