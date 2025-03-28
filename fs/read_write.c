@@ -467,6 +467,37 @@ EXPORT_SYMBOL(kernel_read);
 
 //CW3
 
+// ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+// {
+// 	ssize_t ret;
+
+// 	if (!(file->f_mode & FMODE_READ))
+// 		return -EBADF;
+// 	if (!(file->f_mode & FMODE_CAN_READ))
+// 		return -EINVAL;
+// 	if (unlikely(!access_ok(buf, count)))
+// 		return -EFAULT;
+
+// 	ret = rw_verify_area(READ, file, pos, count);
+// 	if (ret)
+// 		return ret;
+// 	if (count > MAX_RW_COUNT)
+// 		count = MAX_RW_COUNT;
+
+// 	if (file->f_op->read)
+// 		ret = file->f_op->read(file, buf, count, pos);
+// 	else if (file->f_op->read_iter)
+// 		ret = new_sync_read(file, buf, count, pos);
+// 	else
+// 		ret = -EINVAL;
+// 	if (ret > 0) {
+// 		fsnotify_access(file);
+// 		add_rchar(current, ret);
+// 	}
+// 	inc_syscr(current);
+// 	return ret;
+// }
+
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
@@ -484,6 +515,10 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
+	char *temp_buf = kmalloc(count, GFP_KERNEL);
+	if (!temp_buf)
+		return -ENOMEM;
+
 	if (file->f_op->read)
 		ret = file->f_op->read(file, buf, count, pos);
 	else if (file->f_op->read_iter)
@@ -491,6 +526,22 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	else
 		ret = -EINVAL;
 	if (ret > 0) {
+		char key_str[256]; // Buffer to hold the key
+		printk("file->f_path.dentry: %s\n",
+		       file->f_path.dentry->d_name.name);
+		if (!vfs_getxattr(file->f_path.dentry, "user.cw3_encrypt",
+				  key_str, sizeof(key_str))) {
+			unsigned char key = (unsigned char)simple_strtoul(
+				key_str, NULL, 10);
+			for (int i = 0; i < ret; ++i) {
+				temp_buf[i] ^= key;
+			}
+		}
+
+		// Copy the potentially modified buffer back to user space
+		if (copy_to_user(buf, temp_buf, ret)) {
+			ret = -EFAULT;
+		}
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
