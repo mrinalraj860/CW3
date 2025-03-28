@@ -467,144 +467,33 @@ EXPORT_SYMBOL(kernel_read);
 
 //CW3
 
-// ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
-// {
-// 	ssize_t ret;
-
-// 	if (!(file->f_mode & FMODE_READ))
-// 		return -EBADF;
-// 	if (!(file->f_mode & FMODE_CAN_READ))
-// 		return -EINVAL;
-// 	if (unlikely(!access_ok(buf, count)))
-// 		return -EFAULT;
-
-// 	ret = rw_verify_area(READ, file, pos, count);
-// 	if (ret)
-// 		return ret;
-// 	if (count > MAX_RW_COUNT)
-// 		count = MAX_RW_COUNT;
-
-// 	if (file->f_op->read)
-// 		ret = file->f_op->read(file, buf, count, pos);
-// 	else if (file->f_op->read_iter)
-// 		ret = new_sync_read(file, buf, count, pos);
-// 	else
-// 		ret = -EINVAL;
-// 	if (ret > 0) {
-// 		fsnotify_access(file);
-// 		add_rchar(current, ret);
-// 	}
-// 	inc_syscr(current);
-// 	return ret;
-// }
-
-// ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
-// {
-// 	ssize_t ret;
-// 	char key_str[256]; // Buffer to hold the key
-// 	// struct dentry *dentry = file->f_path.dentry;
-// 	if (!(file->f_mode & FMODE_READ))
-// 		return -EBADF;
-// 	if (!(file->f_mode & FMODE_CAN_READ))
-// 		return -EINVAL;
-// 	if (unlikely(!access_ok(buf, count)))
-// 		return -EFAULT;
-
-// 	ret = rw_verify_area(READ, file, pos, count);
-// 	if (ret)
-// 		return ret;
-// 	if (count > MAX_RW_COUNT)
-// 		count = MAX_RW_COUNT;
-
-// 	char *temp_buf = kmalloc(count, GFP_KERNEL);
-// 	if (!temp_buf)
-// 		return -ENOMEM;
-
-// 	if (file->f_op->read)
-// 		ret = file->f_op->read(file, buf, count, pos);
-// 	else if (file->f_op->read_iter)
-// 		ret = new_sync_read(file, buf, count, pos);
-// 	else
-// 		ret = -EINVAL;
-// 	if (ret > 0) {
-// 		printk("file->f_path.dentry: %s\n",
-// 		       file->f_path.dentry->d_name.name);
-// 		if (!vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
-// 				  "user.cw3_encrypt", key_str,
-// 				  sizeof(key_str) - 1)) {
-// 			unsigned char key = simple_strtoul(key_str, NULL, 10);
-// 			for (int i = 0; i < ret; ++i) {
-// 				temp_buf[i] ^= key;
-// 			}
-// 		}
-
-// 		if (copy_to_user(buf, temp_buf, ret))
-// 			ret = -EFAULT;
-// 		fsnotify_access(file);
-// 		add_rchar(current, ret);
-// 	}
-// 	inc_syscr(current);
-// 	return ret;
-// }
-
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
-	char key_str[256];
-	char *temp_buf;
 
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
 	if (!(file->f_mode & FMODE_CAN_READ))
 		return -EINVAL;
-	if (!access_ok(buf, count))
+	if (unlikely(!access_ok(buf, count)))
 		return -EFAULT;
 
 	ret = rw_verify_area(READ, file, pos, count);
 	if (ret)
 		return ret;
-
 	if (count > MAX_RW_COUNT)
 		count = MAX_RW_COUNT;
 
-	temp_buf = kmalloc(count, GFP_KERNEL);
-	if (!temp_buf)
-		return -ENOMEM;
-
-	if (file->f_op->read_iter) {
-		struct kiocb kiocb;
-		struct iov_iter iter;
-		struct kvec kvec;
-
-		init_sync_kiocb(&kiocb, file);
-		kiocb.ki_pos = *pos;
-
-		kvec.iov_base = temp_buf;
-		kvec.iov_len = count;
-		iov_iter_kvec(&iter, READ, &kvec, 1, count);
-
-		ret = file->f_op->read_iter(&kiocb, &iter);
-		*pos = kiocb.ki_pos;
-	} else {
-		// Fallback to kernel_read if read_iter is not defined
-		ret = kernel_read(file, temp_buf, count, pos);
-	}
-
+	if (file->f_op->read)
+		ret = file->f_op->read(file, buf, count, pos);
+	else if (file->f_op->read_iter)
+		ret = new_sync_read(file, buf, count, pos);
+	else
+		ret = -EINVAL;
 	if (ret > 0) {
-		if (vfs_getxattr(file_mnt_idmap(file), file->f_path.dentry,
-				 "user.cw3_encrypt", key_str,
-				 sizeof(key_str) - 1) > 0) {
-			unsigned char key = simple_strtoul(key_str, NULL, 10);
-			for (int i = 0; i < ret; ++i)
-				temp_buf[i] ^= key;
-		}
-
-		if (copy_to_user(buf, temp_buf, ret))
-			ret = -EFAULT;
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
-	kfree(temp_buf);
 	inc_syscr(current);
 	return ret;
 }
