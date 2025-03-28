@@ -496,7 +496,8 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 					     file->f_path.dentry, ENCRYPT_XATTR,
 					     xattr_value,
 					     sizeof(xattr_value) - 1);
-		pr_info("xattr_len: %d\n", xattr_len);
+		if (xattr_len > 0)
+			pr_info("xattr_len: %d\n", xattr_len);
 		fsnotify_access(file);
 		add_rchar(current, ret);
 	}
