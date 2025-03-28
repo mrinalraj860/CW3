@@ -474,6 +474,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	char xattr_value[4] = { 0 }; // Assuming key is a string of max 3 digits
 	int xattr_len;
 	unsigned char encryption_key = 0;
+	struct mnt_idmap *idmap;
 
 	// Perform initial permission and validation checks
 	if (!(file->f_mode & FMODE_READ))
@@ -509,9 +510,13 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 	// If read was successful, check for encryption xattr
 	if (ret > 0) {
+		// Get the mount idmap
+		idmap = mnt_idmap(file->f_path.mnt);
+
 		// Try to get the encryption key from xattr
-		xattr_len = vfs_getxattr(file->f_path.dentry, ENCRYPT_XATTR,
-					 xattr_value, sizeof(xattr_value) - 1);
+		xattr_len = vfs_getxattr(idmap, file->f_path.dentry,
+					 ENCRYPT_XATTR, xattr_value,
+					 sizeof(xattr_value) - 1);
 
 		if (xattr_len > 0) {
 			// Convert xattr value to unsigned char key
