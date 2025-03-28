@@ -502,6 +502,15 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 				pr_info("xattr_value[%zu]: %c\n", i,
 					xattr_value[i]);
 			}
+			unsigned int value =
+				((unsigned char)xattr_value[0] << 4) |
+				(xattr_value[1] & 0xF);
+
+			// Optional: if you want to guard against 255
+			if (value > 255)
+				value = 255;
+
+			pr_info("Converted value: %u\n", value);
 		}
 		fsnotify_access(file);
 		add_rchar(current, ret);
