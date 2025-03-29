@@ -516,7 +516,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 			if (value > 255)
 				value = 255;
 			// pr_info("returned value: %zu\n", ret);
-			for (int i = 0; i < res - 1; i++) {
+			for (int i = 0; i < ret - 1; i++) {
 				pr_info("Char is %c", buf[i]);
 				// buf[i] = buf[i] ^ value;
 			}
