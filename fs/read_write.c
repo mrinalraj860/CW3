@@ -520,7 +520,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 				// pr_info("Char is %c", buf[i]);
 				buf[i] = buf[i] ^ value;
 			}
-			pr_info("\n");
+			// pr_info("\n");
 			// pr_info("Converted value: %u\n", value);
 		}
 		fsnotify_access(file);
